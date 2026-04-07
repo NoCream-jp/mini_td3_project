@@ -1,3 +1,4 @@
+import datetime
 import os
 import csv
 import numpy as np
@@ -46,7 +47,8 @@ def main():
     model.save(os.path.join(OUTPUT_DIR, "simple_td3_model"))
 
     # テスト走行を1回分記録
-    with open(os.path.join(OUTPUT_DIR, f"test_{int(time.time())}_log.csv"), "w", newline="") as f:
+    now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+    with open(os.path.join(OUTPUT_DIR, f"test_{now_time}_log.csv"), "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["step", "x", "y"])
         obs, _ = env.reset()
