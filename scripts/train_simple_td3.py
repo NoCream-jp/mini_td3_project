@@ -9,7 +9,7 @@ from stable_baselines3 import TD3
 # --- 定数 ---
 
 OUTPUT_DIR = "outputs"
-TOTAL_TIMESTEPS = 1000 # 1000ステップでも回る
+TOTAL_TIMESTEPS = 20000 # 1000ステップでも回る
 
 """
 ランダムな場所から原点を目指す
@@ -30,7 +30,7 @@ class RandomStartEnv(gym.Env):
 
     def step(self, action):
         self.state += action
-        # 報酬：原点 (0, 0) との距離が近いほど高い
+        # 報酬：距離のマイナス原点 (0, 0) との距離が近いほど高い
         dist = np.linalg.norm(self.state)
         reward = -dist
         done = bool(dist < 0.1)
