@@ -9,12 +9,13 @@ from stable_baselines3 import TD3
 # --- 定数 ---
 
 OUTPUT_DIR = "outputs"
-TOTAL_TIMESTEPS = 20000 # 1000ステップでも回る
+TOTAL_TIMESTEPS = 1000 # 1000ステップでも回る
 
 """
 ランダムな場所から原点を目指す
 """
 
+# 環境設定クラス
 class RandomStartEnv(gym.Env):
     def __init__(self):
         super().__init__()
@@ -37,10 +38,20 @@ class RandomStartEnv(gym.Env):
         return self.state, reward, done, False, {}
 
 def main():
+    """
+    出力用のディレクトリ作成
+    環境の初期化
+    学習
+    テスト走行を1回分記録
+    """
+
+    # 出力用のディレクトリ作成
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     import time
+
+    # 環境の初期化
     env = RandomStartEnv()
-    
+
     # 学習
     model = TD3("MlpPolicy", env, verbose=1)
     model.learn(total_timesteps=TOTAL_TIMESTEPS)
