@@ -62,8 +62,8 @@ action, _states = model.predict(obs, deterministic=True)
 
 ### venv環境立ち上げ
 ```
-python -m venv .venv<br>
-.venv\Scripts\activate.bat<br>
+python -m venv .venv
+.venv\Scripts\activate.bat
 ```
 
 ### venv上　ライブラリインストールとスクリプトの実行
