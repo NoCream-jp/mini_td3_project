@@ -15,7 +15,7 @@ OUTPUT_DIR = "outputs"
 
 # 学習時のステップ数上限
 # TOTAL_TIMESTEPS = 1000
-TOTAL_TIMESTEPS = 1e5
+TOTAL_TIMESTEPS = 10_000
 
 """
 今回は障害物をかわしてゴールを目指す
