@@ -2,7 +2,7 @@
 
 ---
 
-## 2. 学習・推論 (Stable Baselines3)
+## 学習・推論 (Stable Baselines3)
 
 作成したカスタム環境でTD3エージェントを動かすための基本コード．
 
