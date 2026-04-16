@@ -2,42 +2,80 @@ import datetime
 import os
 import csv
 import numpy as np
+from numpy.random import f
 # 環境
 import gymnasium as gym
 # 学習
 from stable_baselines3 import TD3
-# --- 定数 ---
 
+# 出力用ディレクトリ
 OUTPUT_DIR = "outputs"
-TOTAL_TIMESTEPS = 1000 # 1000ステップでも回る
+# ステップ数上限
+TOTAL_TIMESTEPS = 1000
 
 """
-ランダムな場所から原点を目指す
+今回は障害物をかわしてゴールを目指す
+次回は障害物を動かしてみる
 """
 
 # 環境設定クラス
 class RandomStartEnv(gym.Env):
     def __init__(self):
         super().__init__()
-        self.observation_space = gym.spaces.Box(low=-2.0, high=2.0, shape=(2,), dtype=np.float32)
-        self.action_space = gym.spaces.Box(low=-0.1, high=0.1, shape=(2,), dtype=np.float32)
-        self.state = np.zeros(2, dtype=np.float32)
+        # 観察エリア定義：-2 <= x <= 2, -2 <= y <= 2
+        self.locationervation_space = gym.spaces.Box(low=-2.0, high=2.0, shape=(2,), dtype=np.float32)
+        # 動けるエリア定義：-0.1 <= x <= 0.1, -0.1 <= y <= 0.1
+        self.action_space = gym.spaces.Box(low=-0.1, high=0.1, shape=(2,), type=np.float32)
+        self.location = np.zeros(2, dtype=np.float32)
 
+    # エピソードに一回，初期化時に呼ばれる．
+    # スタート地点を決めなおす．
     def reset(self, seed=None, options=None):
+        # seedは同じランダム数列を再現するためのキー．
+        # これがないと「まったく同じランダムな試練」を異なる方策同士で共有できない．
+        # たくさんある乱数表のうち{seed}番目を使えという指示のようなもの．
         super().reset(seed=seed)
-        # スタート地点を -2.0 ～ 2.0 の間でランダムに決定
-        self.state = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
-        return self.state, {}
+        # スタート地点設定
+        self.location = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
+        return self.location, {}
 
+    # 一歩
     def step(self, action):
-        self.state += action
-        # 報酬：距離のマイナス原点 (0, 0) との距離が近いほど高い
-        dist = np.linalg.norm(self.state)
+        # 移動する．np.arrayだから+=で記述できる.
+        self.location += action
+        # 単に直線距離計算
+        dist = np.linalg.norm(self.location)
         reward = -dist
-        done = bool(dist < 0.1)
-        return self.state, reward, done, False, {}
+        # 終了条件フラグ 今回は原点からの距離0.1以下
+        finish_flag = bool(dist < 0.1)
+        return self.location, reward, finish_flag, False, {} # 状態，報酬，終了したか否か，あとは便宜上
+
+# 学習(td3)
+def learn_td3(env):
+    model = TD3("MlpPolicy", env, verbose=1)
+    model.learn(total_timesteps=TOTAL_TIMESTEPS)
+    model.save(os.path.join(OUTPUT_DIR, "simple_td3_model"))
+    return model
+
+def save_result(now_time, model, env):
+    with open(os.path.join(OUTPUT_DIR, f"test_{now_time}_log.csv"), "w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["step", "x", "y"])
+        location, _ = env.reset()
+        # 前回のlocationを使ってステップを1進める．
+        # ノイズ一切なし（deterministic = True）= 決定論的
+        for i in range(200):
+            # 予測して
+            action, _ = model.predict(location, deterministic=True)
+            # それをもとに1ステップ進める
+            location, _, finish_flag, _, _ = env.step(action)
+            writer.writerow([i, location[0], location[1]]) # 行番号，x, y
+            # 学習が完了（終了条件: 原点に距離1以内で接近）していれば終わり
+            if finish_flag:
+                break
 
 def main():
+
     """
     出力用のディレクトリ作成
     環境の初期化
@@ -47,27 +85,18 @@ def main():
 
     # 出力用のディレクトリ作成
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    import time
-
-    # 環境の初期化
+    
+    # 環境を初期化して準備
     env = RandomStartEnv()
 
     # 学習
-    model = TD3("MlpPolicy", env, verbose=1)
-    model.learn(total_timesteps=TOTAL_TIMESTEPS)
-    model.save(os.path.join(OUTPUT_DIR, "simple_td3_model"))
+    model = learn_td3(env)
 
-    # テスト走行を1回分記録
+    # テスト走行記録
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
-    with open(os.path.join(OUTPUT_DIR, f"test_{now_time}_log.csv"), "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["step", "x", "y"])
-        obs, _ = env.reset()
-        for i in range(200):
-            action, _ = model.predict(obs, deterministic=True)
-            obs, _, done, _, _ = env.step(action)
-            writer.writerow([i, obs[0], obs[1]])
-            if done: break
+    save_result(now_time, model, env)
+
+    return
 
 if __name__ == "__main__":
     main()
