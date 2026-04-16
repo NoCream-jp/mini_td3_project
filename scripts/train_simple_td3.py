@@ -12,8 +12,10 @@ import matplotlib.pyplot as plt
 
 # 出力用ディレクトリ
 OUTPUT_DIR = "outputs"
-# ステップ数上限
-TOTAL_TIMESTEPS = 1000
+
+# 学習時のステップ数上限
+# TOTAL_TIMESTEPS = 1000
+TOTAL_TIMESTEPS = 1e5
 
 """
 今回は障害物をかわしてゴールを目指す
