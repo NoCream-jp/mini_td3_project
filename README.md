@@ -68,7 +68,7 @@ python -m venv .venv
 
 ### venv上　ライブラリインストールとスクリプトの実行
 ```
-pip install stable-baseline3 gymnasium numpy
+pip install stable-baselines3 gymnasium numpy
 python -m scripts.train_simple_td3
 ```
 
