@@ -23,6 +23,7 @@ TOTAL_TIMESTEPS = 1e5
 """
 
 # 環境設定クラス
+# 学習時の挙動を定義．大事な追加分は特にsteps_limit_with_learning
 class RandomStartEnv(gym.Env):
     def __init__(self):
         super().__init__()
@@ -31,6 +32,9 @@ class RandomStartEnv(gym.Env):
         # 動けるエリア定義：-0.1 <= x <= 0.1, -0.1 <= y <= 0.1
         self.action_space = gym.spaces.Box(low=-0.1, high=0.1, shape=(2,), dtype=np.float32)
         self.location = np.zeros(2, dtype=np.float32)
+        ## 1エピソードで歩めるstep数に制限をかける．見当違いで全ステップ数を消費しないように
+        self.steps_limit_with_learning = 200
+        self.current_step = 0
 
     # エピソードに一回，初期化時に呼ばれる．
     # スタート地点を決めなおす．
@@ -41,10 +45,15 @@ class RandomStartEnv(gym.Env):
         super().reset(seed=seed)
         # スタート地点設定
         self.location = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
+        # エピソードごとにstep数をリセット
+        self.current_step = 0
         return self.location, {}
 
     # 一歩
     def step(self, action):
+        # step数制限までは歩き続ける．
+        self.current_step += 1
+
         # 移動する．np.arrayだから+=で記述できる.
         self.location += action
         # 単に直線距離計算
@@ -52,7 +61,9 @@ class RandomStartEnv(gym.Env):
         reward = -dist
         # 終了条件フラグ 今回は原点からの距離0.1以下
         finish_flag = bool(dist < 0.1)
-        return self.location, reward, finish_flag, False, {} # 状態，報酬，終了したか否か，あとは便宜上
+        # リミット超過しなかったかのフラグ
+        over_step_flag = self.steps_limit_with_learning <= self.current_step
+        return self.location, reward, finish_flag, over_step_flag, {} # 状態，報酬，終了したか否か，あとは便宜上
 
 # 学習(td3)
 def learn_td3(env):
