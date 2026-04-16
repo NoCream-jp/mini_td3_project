@@ -25,7 +25,7 @@ class RandomStartEnv(gym.Env):
         # 観察エリア定義：-2 <= x <= 2, -2 <= y <= 2
         self.locationervation_space = gym.spaces.Box(low=-2.0, high=2.0, shape=(2,), dtype=np.float32)
         # 動けるエリア定義：-0.1 <= x <= 0.1, -0.1 <= y <= 0.1
-        self.action_space = gym.spaces.Box(low=-0.1, high=0.1, shape=(2,), type=np.float32)
+        self.action_space = gym.spaces.Box(low=-0.1, high=0.1, shape=(2,), dtype=np.float32)
         self.location = np.zeros(2, dtype=np.float32)
 
     # エピソードに一回，初期化時に呼ばれる．
