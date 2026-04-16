@@ -7,6 +7,8 @@ from numpy.random import f
 import gymnasium as gym
 # 学習
 from stable_baselines3 import TD3
+# 描画
+import matplotlib.pyplot as plt
 
 # 出力用ディレクトリ
 OUTPUT_DIR = "outputs"
@@ -23,7 +25,7 @@ class RandomStartEnv(gym.Env):
     def __init__(self):
         super().__init__()
         # 観察エリア定義：-2 <= x <= 2, -2 <= y <= 2
-        self.locationervation_space = gym.spaces.Box(low=-2.0, high=2.0, shape=(2,), dtype=np.float32)
+        self.observation_space = gym.spaces.Box(low=-2.0, high=2.0, shape=(2,), dtype=np.float32)
         # 動けるエリア定義：-0.1 <= x <= 0.1, -0.1 <= y <= 0.1
         self.action_space = gym.spaces.Box(low=-0.1, high=0.1, shape=(2,), dtype=np.float32)
         self.location = np.zeros(2, dtype=np.float32)
@@ -69,10 +71,52 @@ def save_result(now_time, model, env):
             action, _ = model.predict(location, deterministic=True)
             # それをもとに1ステップ進める
             location, _, finish_flag, _, _ = env.step(action)
-            writer.writerow([i, location[0], location[1]]) # 行番号，x, y
+            writer.writerow([i, location[0], location[1]]) # 行番号，x, yをcsvに記録
             # 学習が完了（終了条件: 原点に距離1以内で接近）していれば終わり
             if finish_flag:
                 break
+
+def draw_from_csv(now_time):
+    """
+    指定された日時のCSVファイルから軌跡を読み込み、
+    matplotlibで描画して画像として保存する
+    """
+    # 現在時刻からcsvの名前を作ったので，それを利用して持ってこれる
+    csv_path = os.path.join(OUTPUT_DIR, f"test_{now_time}_log.csv")
+
+    x_history = []
+    y_history = []
+    # CSVの読み込み
+    with open(csv_path, "r") as file:
+        reader = csv.reader(file)
+        next(reader)
+        for row in reader:
+            x_history.append(float(row[1]))
+            y_history.append(float(row[2]))
+
+    # --- 描画設定 ---
+    plt.figure(figsize=(6, 6)) # 正方形のグラフにする
+
+    # 観察エリアの制限 (-2.0 から 2.0)
+    plt.xlim(-2.0, 2.0)
+    plt.ylim(-2.0, 2.0)
+    # ゴール地点（原点）をプロット
+    plt.scatter(0, 0, color='red', marker='*', s=200, label='Goal (0,0)')
+    # 軌跡を折れ線グラフでプロット
+    plt.plot(x_history, y_history, color='blue', marker='.', linestyle='-', linewidth=1.5, label='Trajectory')
+    # スタート地点を緑色の点で強調
+    plt.scatter(x_history[0], y_history[0], color='green', marker='o', s=100, label='Start')
+    # 見た目の調整
+    plt.title(f"Agent Trajectory ({now_time})")
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.legend() # 凡例を表示
+    # 画像として保存して閉じる
+    img_path = os.path.join(OUTPUT_DIR, f"trajectory_{now_time}.png")
+    plt.savefig(img_path)
+    plt.close()
+    print(f"軌跡の画像を保存しました: {img_path}")
 
 def main():
 
@@ -85,7 +129,7 @@ def main():
 
     # 出力用のディレクトリ作成
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
+
     # 環境を初期化して準備
     env = RandomStartEnv()
 
@@ -96,6 +140,8 @@ def main():
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     save_result(now_time, model, env)
 
+    # 描画してpngとして保存
+    draw_from_csv(now_time)
     return
 
 if __name__ == "__main__":
