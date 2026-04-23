@@ -17,7 +17,7 @@ OUTPUT_DIR = "outputs"
 
 # 学習時のステップ数上限
 # TOTAL_TIMESTEPS = 1000
-TOTAL_TIMESTEPS = 100_000
+TOTAL_TIMESTEPS = 50_000
 
 """
 今回は障害物をかわしてゴールを目指す
@@ -50,9 +50,9 @@ class RandomStartEnv(gym.Env):
         # たくさんある乱数表のうち{seed}番目を使えという指示のようなもの．
         super().reset(seed=seed)
         # スタート地点設定
-        # self.location = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
-        # スタート地点も固定
-        self.location = np.array([1.9, 1.9], dtype=np.float32)
+        self.location = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
+        # # スタート地点も固定
+        # self.location = np.array([1.9, 1.9], dtype=np.float32)
         # エピソードごとにstep数をリセット
         self.current_step = 0
 
@@ -109,6 +109,8 @@ def save_result(now_time, model, env):
         writer = csv.writer(file)
         writer.writerow(["step", "x", "y"])
         location, _ = env.reset()
+        location = np.array([1.9, 1.9], dtype=np.float32)
+        env.unwrapped.location = location
         # 前回のlocationを使ってステップを1進める．
         # ノイズ一切なし（deterministic = True）= 決定論的
         for i in range(1000):
