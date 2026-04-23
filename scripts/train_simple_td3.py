@@ -39,8 +39,8 @@ class RandomStartEnv(gym.Env):
         self.current_step = 0
 
         # 障害物エリア定義
-        self.obstacle_center = np.array([0.5, 0.5], dtype=np.float32)
-        self.obstacle_radius = 0.8
+        self.obstacle_center = np.array([1.0, 1.0], dtype=np.float32)
+        self.obstacle_radius = 0.5
 
     # エピソードに一回，初期化時に呼ばれる．
     # スタート地点を決めなおす．
@@ -147,7 +147,7 @@ def draw_from_csv(now_time):
     plt.scatter(0, 0, color='red', marker='*', s=200, label='Goal (0,0)')
 
     # 障害物の描画
-    obstacle_circle = patches.Circle((0.5, 0.5), radius=0.8, color='grey', alpha=0.5, label='Obstacle')
+    obstacle_circle = patches.Circle((1.0, 1.0), radius=0.5, color='grey', alpha=0.5, label='Obstacle')
     plt.gca().add_patch(obstacle_circle)
 
     # 軌跡を折れ線グラフでプロット
