@@ -9,17 +9,19 @@ import gymnasium as gym
 from stable_baselines3 import TD3
 # 描画
 import matplotlib.pyplot as plt
+# 障害物描画
+import matplotlib.patches as patches
 
 # 出力用ディレクトリ
 OUTPUT_DIR = "outputs"
 
 # 学習時のステップ数上限
 # TOTAL_TIMESTEPS = 1000
-TOTAL_TIMESTEPS = 10_000
+TOTAL_TIMESTEPS = 100_000
 
 """
 今回は障害物をかわしてゴールを目指す
-次回は障害物を動かしてみる
+次回は障害物を動かしてみる？
 """
 
 # 環境設定クラス
@@ -36,6 +38,10 @@ class RandomStartEnv(gym.Env):
         self.steps_limit_with_learning = 200
         self.current_step = 0
 
+        # 障害物エリア定義
+        self.obstacle_center = np.array([0.5, 0.5], dtype=np.float32)
+        self.obstacle_radius = 0.8
+
     # エピソードに一回，初期化時に呼ばれる．
     # スタート地点を決めなおす．
     def reset(self, seed=None, options=None):
@@ -47,22 +53,46 @@ class RandomStartEnv(gym.Env):
         self.location = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
         # エピソードごとにstep数をリセット
         self.current_step = 0
+
+        # 障害物の中に入らないようにする
+        while True:
+            self.location = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
+            dist_to_obstacle = np.linalg.norm(self.location - self.obstacle_center)
+            if self.obstacle_radius < dist_to_obstacle:
+                break # 障害物の外なら確定してループを抜ける
+
         return self.location, {}
 
     # 一歩
     def step(self, action):
         # step数制限までは歩き続ける．
         self.current_step += 1
-
         # 移動する．np.arrayだから+=で記述できる.
         self.location += action
-        # 単に直線距離計算
-        dist = np.linalg.norm(self.location)
-        reward = -dist
-        # 終了条件フラグ 今回は原点からの距離0.1以下
-        finish_flag = bool(dist < 0.1)
+
+        # ゴールへの距離計算
+        dist_to_goal = np.linalg.norm(self.location)
+        # 障害物への距離計算
+        dist_to_obstacle = np.linalg.norm(self.location - self.obstacle_center)
+
+        # reward = -dist_to_goal #
+        # 終了条件フラグ
+        finish_flag = False
         # リミット超過しなかったかのフラグ
         over_step_flag = self.steps_limit_with_learning <= self.current_step
+
+        if dist_to_obstacle <= self.obstacle_radius:
+            # 障害物に衝突した場合強制終了
+            reward = -1000
+            finish_flag = True
+        elif dist_to_goal <= 0.1:
+            # ゴールに到達した場合強制終了
+            reward = -float(dist_to_goal)
+            finish_flag = True
+        else:
+            # 通常移動
+            reward = -float(dist_to_goal)
+
         return self.location, reward, finish_flag, over_step_flag, {} # 状態，報酬，終了したか否か，あとは便宜上
 
 # 学習(td3)
@@ -79,14 +109,14 @@ def save_result(now_time, model, env):
         location, _ = env.reset()
         # 前回のlocationを使ってステップを1進める．
         # ノイズ一切なし（deterministic = True）= 決定論的
-        for i in range(200):
+        for i in range(1000):
             # 予測して
             action, _ = model.predict(location, deterministic=True)
             # それをもとに1ステップ進める
-            location, _, finish_flag, _, _ = env.step(action)
+            location, _, finish_flag, over_step_flag, _ = env.step(action)
             writer.writerow([i, location[0], location[1]]) # 行番号，x, yをcsvに記録
             # 学習が完了（終了条件: 原点に距離1以内で接近）していれば終わり
-            if finish_flag:
+            if finish_flag or over_step_flag:
                 break
 
 def draw_from_csv(now_time):
@@ -109,12 +139,17 @@ def draw_from_csv(now_time):
 
     # --- 描画設定 ---
     plt.figure(figsize=(6, 6)) # 正方形のグラフにする
-
     # 観察エリアの制限 (-2.0 から 2.0)
     plt.xlim(-2.0, 2.0)
     plt.ylim(-2.0, 2.0)
+
     # ゴール地点（原点）をプロット
     plt.scatter(0, 0, color='red', marker='*', s=200, label='Goal (0,0)')
+
+    # 障害物の描画
+    obstacle_circle = patches.Circle((0.5, 0.5), radius=0.8, color='grey', alpha=0.5, label='Obstacle')
+    plt.gca().add_patch(obstacle_circle)
+
     # 軌跡を折れ線グラフでプロット
     plt.plot(x_history, y_history, color='blue', marker='.', linestyle='-', linewidth=1.5, label='Trajectory')
     # スタート地点を緑色の点で強調
