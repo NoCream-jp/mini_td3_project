@@ -50,7 +50,9 @@ class RandomStartEnv(gym.Env):
         # たくさんある乱数表のうち{seed}番目を使えという指示のようなもの．
         super().reset(seed=seed)
         # スタート地点設定
-        self.location = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
+        # self.location = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
+        # スタート地点も固定
+        self.location = np.array([1.9, 1.9], dtype=np.float32)
         # エピソードごとにstep数をリセット
         self.current_step = 0
 
