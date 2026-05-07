@@ -12,6 +12,9 @@ import matplotlib.pyplot as plt
 # 障害物描画
 import matplotlib.patches as patches
 
+# 環境インポート
+from jammer_nav.envs.jammer_nav_env import JammerNavEnv
+
 # 出力用ディレクトリ
 OUTPUT_DIR = "outputs"
 
@@ -26,6 +29,7 @@ TOTAL_TIMESTEPS = 100_000
 
 # 環境設定クラス
 # 学習時の挙動を定義．大事な追加分は特にsteps_limit_with_learning
+# JammerNavEnvで置き換える
 class RandomStartEnv(gym.Env):
     def __init__(self):
         super().__init__()
@@ -183,7 +187,8 @@ def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # 環境を初期化して準備
-    env = RandomStartEnv()
+    # env = RandomStartEnv()
+    env = JammerNavEnv()
 
     # 学習
     model = learn_td3(env)
