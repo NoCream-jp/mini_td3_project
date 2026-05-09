@@ -1,130 +1,93 @@
-# jammer_nav/envs/jammer_nav_env.py
-from __future__ import annotations
 import math
 from dataclasses import dataclass
-from typing import Optional
-
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from gymnasium.utils import seeding  # ← 追加：seedingエラー対策
-
-def _wrap_angle(angle: float) -> float:
-    return (angle + np.pi) % (2 * np.pi) - np.pi
-
-@dataclass
-class JammerParams:
-    v_mean: float = 0.0
-    v_std: float = 0.0
-    turn_rate_std: float = 0.0
-    radius_m: float = 0.5    # 学習側の obstacle_radius=0.5 に合わせる
-
-    yaw_rate_max: float = np.deg2rad(90.0)
-    v_min: float = 0.0
-    v_max: float = 1.0
-    v_track_tau: float = 0.3
-
-    mode: str = "spin"
-    tight_spin: bool = False
-    spin_dir: float = +1.0
-    motion_basis: str = "x"
-    v_min_eps: float = 0.05
 
 @dataclass
 class JammerState:
-    x: float = 1.0   # 学習側の障害物初期位置(1.0, 1.0)に合わせる
+    x: float = 1.0
     y: float = 1.0
-    psi: float = 0.0
-    v: float = 0.0
+    psi: float = 0.0 # 向いている角度
+    v: float = 0.05  # 移動速度（動くように0.05を設定！）
 
-@dataclass
-class DynParams:
-    dt: float = 0.1
-    goal_tol_m: float = 0.1
-
-class JammerNavEnv(gym.Env):
-    metadata = {"render_modes": []}
-
-    def __init__(self, seed: Optional[int] = None):
+class MyJammerEnv(gym.Env):
+    def __init__(self):
         super().__init__()
         
-        # --- 学習側のインターフェースに合わせる ---
-        self.observation_space = spaces.Box(low=-2.0, high=2.0, shape=(2,), dtype=np.float32)
-        # 型ヒントを追加して、エディタにBox型であることを認識させる
-        self.action_space: spaces.Box = spaces.Box(low=-0.1, high=0.1, shape=(2,), dtype=np.float32)
+        # 観測空間を拡張！ [自分のx, 自分のy, ジャマーのx, ジャマーのy] の4つの数値が見えるようになる
+        self.observation_space = spaces.Box(low=-2.0, high=2.0, shape=(4,), dtype=np.float32)
+        # 行動空間は今まで通り [dx, dy]
+        self.action_space = spaces.Box(low=-0.1, high=0.1, shape=(2,), dtype=np.float32)
         
         self.location = np.zeros(2, dtype=np.float32)
+        self.jam = JammerState()
         
         self.steps_limit_with_learning = 200
         self.current_step = 0
-        
-        # --- Jammer（障害物）の設定 ---
-        self.jp = JammerParams()
-        self.jam = JammerState()
-        self.obstacle_radius = self.jp.radius_m
-        self.use_jammer = True
-        self.dyn = DynParams()
+        self.obstacle_radius = 0.5
+        self.goal_tol_m = 0.1
 
-        if seed is not None:
-            # 修正：seedingエラー対策のため、インポートしたseedingを使用
-            self.np_random, _ = seeding.np_random(seed)
-
-    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
-        if seed is not None:
-            super().reset(seed=seed)
-        else:
-            super().reset()
-            
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
         self.current_step = 0
+        
+        # ジャマーを初期位置にリセット（角度はランダムにして、毎回違う方向に動くようにする）
+        self.jam = JammerState(
+            x=1.0, 
+            y=1.0, 
+            psi=float(self.np_random.uniform(-np.pi, np.pi)), 
+            v=0.05
+        )
 
-        # Jammerの初期位置
-        self.jam = JammerState(x=1.0, y=1.0, psi=0.0, v=0.0)
-
-        # 障害物の中に入らないようにスタート地点を決定
+        # エージェントがジャマーの中に入らないように初期化
         while True:
             self.location = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
             dist_to_obstacle = np.linalg.norm(self.location - np.array([self.jam.x, self.jam.y]))
             if dist_to_obstacle > self.obstacle_radius:
                 break
 
-        return self.location.copy(), {}
+        return self._get_obs(), {}
 
-    def step(self, action: np.ndarray):
+    def step(self, action):
         self.current_step += 1
-
-        # 修正：low/highエラー対策として、assertを使ってBox型であることを保証する
-        assert isinstance(self.action_space, spaces.Box)
         
-        # アクションの適用
-        action = np.clip(action, self.action_space.low, self.action_space.high)
+        # 1. ジャマー（動的障害物）の更新 (先輩のロジックを簡略化して再現)
+        # 毎ステップ、少しずつ回転しながら進む（円を描くように動く）
+        yaw_rate = 0.1
+        self.jam.psi += yaw_rate
+        self.jam.x += self.jam.v * math.cos(self.jam.psi)
+        self.jam.y += self.jam.v * math.sin(self.jam.psi)
+        
+        # 2. エージェントの更新
         self.location += action
 
-        # 1) Jammer(動的障害物)の更新
-        if self.use_jammer:
-            self._update_jammer()
-
-        # 2) 距離計算
-        dist_to_goal = float(np.linalg.norm(self.location))
+        # 3. 距離計算と終了判定
+        dist_to_goal = np.linalg.norm(self.location)
         jam_pos = np.array([self.jam.x, self.jam.y])
-        dist_to_obstacle = float(np.linalg.norm(self.location - jam_pos))
+        dist_to_obstacle = np.linalg.norm(self.location - jam_pos)
 
-        # 3) 終了判定フラグ
         finish_flag = False
-        over_step_flag = (self.current_step >= self.steps_limit_with_learning)
+        over_step_flag = self.steps_limit_with_learning <= self.current_step
 
-        # 4) 報酬・衝突判定
+        # 4. 報酬計算 (前回修正した特大ボーナス入り)
         if dist_to_obstacle <= self.obstacle_radius:
             reward = -1000.0
             finish_flag = True
-        elif dist_to_goal <= self.dyn.goal_tol_m:
-            reward = -dist_to_goal
+        elif dist_to_goal <= self.goal_tol_m:
+            reward = 1000.0
             finish_flag = True
         else:
-            reward = -dist_to_goal
+            reward = -float(dist_to_goal)
 
-        return self.location.copy(), reward, finish_flag, over_step_flag, {}
+        return self._get_obs(), reward, finish_flag, over_step_flag, {}
 
-    def _update_jammer(self):
-        dt = self.dyn.dt
-        self.jam.x += self.jam.v * math.cos(self.jam.psi) * dt
-        self.jam.y += self.jam.v * math.sin(self.jam.psi) * dt
+    def _get_obs(self):
+        # AIの「目」となる情報を配列にまとめる
+        obs = np.array([
+            self.location[0], 
+            self.location[1], 
+            self.jam.x, 
+            self.jam.y
+        ], dtype=np.float32)
+        return obs
