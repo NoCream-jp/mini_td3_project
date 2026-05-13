@@ -52,13 +52,30 @@ class MyJammerEnv(gym.Env):
     def step(self, action):
         self.current_step += 1
         
-        # ジャマーの更新
-        yaw_rate = 0.1
-        self.jam.psi += yaw_rate
-        self.jam.x += self.jam.v * math.cos(self.jam.psi)
-        self.jam.y += self.jam.v * math.sin(self.jam.psi)
+        # ==========================================
+        # 1. ジャマーの更新（原点周りの円運動）
+        # ==========================================
+        # 現在のゴール(0,0)からの距離（軌道半径）を計算
+        orbit_radius = math.hypot(self.jam.x, self.jam.y)
         
-        # エージェントの更新
+        if orbit_radius > 1e-5: # 原点にピッタリ重なっている場合のゼロ割りエラー防止
+            # 現在の原点から見た角度を計算
+            current_angle = math.atan2(self.jam.y, self.jam.x)
+            
+            # 角速度を計算 (角速度 ω = 速度 v / 半径 r)
+            angular_speed = self.jam.v / orbit_radius
+            
+            # 角度を少し進めて、新しいX, Y座標を再計算
+            new_angle = current_angle + angular_speed
+            self.jam.x = orbit_radius * math.cos(new_angle)
+            self.jam.y = orbit_radius * math.sin(new_angle)
+            
+            # AIの内部計算用に、進行方向(psi)を円の接線方向に向けておく
+            self.jam.psi = new_angle + (math.pi / 2.0)
+        
+        # ==========================================
+        # 2. エージェントの更新（壁のクリッピング対応済）
+        # ==========================================
         next_location = self.location + action
         # -2.0 ～ 2.0 の範囲にクリッピング
         clipped_location = np.clip(next_location, -2.0, 2.0)
@@ -67,7 +84,9 @@ class MyJammerEnv(gym.Env):
         
         self.location = clipped_location # クリップされた安全な座標を確定
 
-        # 距離計算
+        # ==========================================
+        # 3. 距離計算と終了判定
+        # ==========================================
         dist_to_goal = np.linalg.norm(self.location)
         jam_pos = np.array([self.jam.x, self.jam.y])
         dist_to_obstacle = np.linalg.norm(self.location - jam_pos)
@@ -75,7 +94,9 @@ class MyJammerEnv(gym.Env):
         finish_flag = False
         over_step_flag = self.steps_limit_with_learning <= self.current_step
 
-        # 報酬計算
+        # ==========================================
+        # 4. 報酬計算
+        # ==========================================
         if dist_to_obstacle <= self.obstacle_radius:
             reward = config.OBSTACLE_REWARD
             finish_flag = True
