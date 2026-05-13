@@ -67,7 +67,6 @@ action, _states = model.predict(obs, deterministic=True)
 python -m venv .venv
 .venv\Scripts\activate.bat
 ```
-*(※PowerShellの場合は `.venv\Scripts\Activate.ps1`)*
 
 ### venv上でのライブラリインストールと実行
 ```cmd
@@ -83,7 +82,7 @@ deactivate
 ---
 
 ## プロジェクト構成
-役割ごとにファイルを分割し、見通しの良い設計となっている。
+役割ごとにファイルを分割した
 
 ```text
 mini_td3_project/
