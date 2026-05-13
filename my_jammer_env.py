@@ -59,7 +59,13 @@ class MyJammerEnv(gym.Env):
         self.jam.y += self.jam.v * math.sin(self.jam.psi)
         
         # エージェントの更新
-        self.location += action
+        next_location = self.location + action
+        # -2.0 ～ 2.0 の範囲にクリッピング
+        clipped_location = np.clip(next_location, -2.0, 2.0)
+        # クリップされたか（見えない壁にぶつかったか）を判定
+        hit_wall = not np.array_equal(next_location, clipped_location)
+        
+        self.location = clipped_location # クリップされた安全な座標を確定
 
         # 距離計算
         dist_to_goal = np.linalg.norm(self.location)
@@ -71,13 +77,15 @@ class MyJammerEnv(gym.Env):
 
         # 報酬計算
         if dist_to_obstacle <= self.obstacle_radius:
-            reward = -1000.0
+            reward = config.OBSTACLE_REWARD
             finish_flag = True
         elif dist_to_goal <= self.goal_tol_m:
-            reward = 1000.0
+            reward = config.GOAL_REWARD
             finish_flag = True
         else:
             reward = -float(dist_to_goal)
+            if hit_wall:
+                reward += config.WALL_PENALTY # 距離ペナルティに加えて、壁ドンに対する罰
 
         return self._get_obs(), reward, finish_flag, over_step_flag, {}
 

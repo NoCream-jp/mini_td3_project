@@ -14,3 +14,8 @@ JAMMER_START_POS = [1.0, 1.0]   # ジャマー（障害物）の初期位置
 JAMMER_SPEED = 0.2             # ジャマーの移動速度
 OBSTACLE_RADIUS = 0.4           # 障害物の判定半径
 GOAL_TOLERANCE = 0.1            # ゴール判定の距離
+
+# --- 4. 報酬値など（すべて加算想定） ---
+WALL_PENALTY = -100  #　壁に衝突した際の報酬
+OBSTACLE_REWARD  = -1000
+GOAL_REWARD = 1000
