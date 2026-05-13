@@ -15,7 +15,7 @@ class MyJammerEnv(gym.Env):
     def __init__(self):
         super().__init__()
         
-        # 観測空間を拡張！ [自分のx, 自分のy, ジャマーのx, ジャマーのy] の4つの数値が見えるようになる
+        # 観測空間を拡張 [自分のx, 自分のy, ジャマーのx, ジャマーのy] の4つの数値が見えるようになる
         self.observation_space = spaces.Box(low=-2.0, high=2.0, shape=(4,), dtype=np.float32)
         # 行動空間は今まで通り [dx, dy]
         self.action_space = spaces.Box(low=-0.1, high=0.1, shape=(2,), dtype=np.float32)
@@ -83,7 +83,6 @@ class MyJammerEnv(gym.Env):
         return self._get_obs(), reward, finish_flag, over_step_flag, {}
 
     def _get_obs(self):
-        # AIの「目」となる情報を配列にまとめる
         obs = np.array([
             self.location[0], 
             self.location[1], 

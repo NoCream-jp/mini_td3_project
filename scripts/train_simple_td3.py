@@ -65,7 +65,7 @@ def draw_from_csv(now_time):
 
     plt.scatter(0, 0, color='red', marker='*', s=200, label='Goal (0,0)')
 
-    # ジャマーの軌跡をオレンジの点線でプロット！
+    # ジャマーの軌跡をオレンジの点線でプロット
     plt.plot(jammer_x_history, jammer_y_history, color='orange', linestyle='--', linewidth=2.0, label='Jammer Trajectory')
     
     # 衝突判定の円は、ジャマーの「最後の位置」に描画する
