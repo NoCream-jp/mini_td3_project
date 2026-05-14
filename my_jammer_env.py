@@ -33,7 +33,7 @@ class MyJammerEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.current_step = 0
-        
+
         self.jam = JammerState(
             x=config.JAMMER_START_POS[0], 
             y=config.JAMMER_START_POS[1], 
@@ -44,7 +44,7 @@ class MyJammerEnv(gym.Env):
         while True:
             self.location = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
             dist_to_obstacle = np.linalg.norm(self.location - np.array([self.jam.x, self.jam.y]))
-            if dist_to_obstacle > self.obstacle_radius:
+            if self.obstacle_radius < dist_to_obstacle:
                 break
 
         return self._get_obs(), {}
@@ -56,6 +56,7 @@ class MyJammerEnv(gym.Env):
         # 1. ジャマーの更新（原点周りの円運動）
         # ==========================================
         # 現在のゴール(0,0)からの距離（軌道半径）を計算
+        """
         orbit_radius = math.hypot(self.jam.x, self.jam.y)
         
         if orbit_radius > 1e-5: # 原点にピッタリ重なっている場合のゼロ割りエラー防止
@@ -72,7 +73,7 @@ class MyJammerEnv(gym.Env):
             
             # AIの内部計算用に、進行方向(psi)を円の接線方向に向けておく
             self.jam.psi = new_angle + (math.pi / 2.0)
-        
+        """
         # ==========================================
         # 2. エージェントの更新（壁のクリッピング対応済）
         # ==========================================
@@ -81,7 +82,7 @@ class MyJammerEnv(gym.Env):
         clipped_location = np.clip(next_location, -2.0, 2.0)
         # クリップされたか（見えない壁にぶつかったか）を判定
         hit_wall = not np.array_equal(next_location, clipped_location)
-        
+
         self.location = clipped_location # クリップされた安全な座標を確定
 
         # ==========================================
