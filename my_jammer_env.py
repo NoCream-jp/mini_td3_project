@@ -7,7 +7,6 @@ from gymnasium import spaces
 # config.py インポート
 import config
 
-
 # Jammer一つのステータス
 class JammerState:
     def __init__(self, x, y, speed):
@@ -30,6 +29,7 @@ class JammerState:
             self.y = orbit_radius * math.sin(new_angle)
             self.psi = new_angle + (math.pi / 2.0)
 
+# 環境定義
 class MyJammerEnv(gym.Env):
     def __init__(self):
         super().__init__()
@@ -43,7 +43,7 @@ class MyJammerEnv(gym.Env):
         
         self.location = np.zeros(2, dtype=np.float32)
         self.jammers = [] # 複数のジャマーを入れるリスト
-
+        
         self.steps_limit_with_learning = config.MAX_STEPS_PER_EPISODE
         self.current_step = 0
         self.obstacle_radius = config.OBSTACLE_RADIUS
@@ -52,7 +52,7 @@ class MyJammerEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.current_step = 0
-        
+
         # すべてのジャマーを初期化してリストに格納
         self.jammers = []
         for j_conf in config.JAMMER_CONFIGS:
@@ -89,7 +89,7 @@ class MyJammerEnv(gym.Env):
 
         # 3. 距離計算と終了判定
         dist_to_goal = np.linalg.norm(self.location)
-        
+
         # 一番近いジャマーとの距離を計算
         min_dist_to_obstacle = float('inf')
         for jam in self.jammers:

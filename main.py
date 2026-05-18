@@ -10,6 +10,8 @@ import matplotlib.patches as patches
 import config
 from my_jammer_env import MyJammerEnv
 
+# コールバック関数
+## データロガー
 class EpisodeLoggerCallback(BaseCallback):
     def __init__(self, total_episodes: int, verbose=0):
         super().__init__(verbose)
@@ -18,6 +20,7 @@ class EpisodeLoggerCallback(BaseCallback):
         self.current_ep_reward = 0.0
         self.episode_rewards = []
 
+    # 報酬を描画用にrewardsに保存
     def _on_step(self) -> bool:
         self.current_ep_reward += self.locals["rewards"][0]
         done = self.locals["dones"][0]
@@ -29,11 +32,16 @@ class EpisodeLoggerCallback(BaseCallback):
                 return False
         return True
 
-def learn_td3(env):
+def learn_td3(env):    
+    # モデル用意
     model = TD3("MlpPolicy", env, verbose=1)
+    # コールバック用意
     callback = EpisodeLoggerCallback(total_episodes=config.TOTAL_EPISODES)
+    # タイムステップ上限設定
     max_possible_timesteps = config.TOTAL_EPISODES * config.MAX_STEPS_PER_EPISODE
+    # learn打つ
     model.learn(total_timesteps=max_possible_timesteps, callback=callback)
+    # save
     model.save(os.path.join(config.OUTPUT_DIR, "simple_td3_model"))
     return model, callback.episode_rewards
 
