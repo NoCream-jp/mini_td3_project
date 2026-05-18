@@ -1,4 +1,3 @@
-# main.py
 import datetime
 import os
 import csv
@@ -8,10 +7,9 @@ from stable_baselines3.common.callbacks import BaseCallback
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
-import config  # 変数ファイルをインポート
-from my_jammer_env import MyJammerEnv  # 環境をインポート
+import config
+from my_jammer_env import MyJammerEnv
 
-# --- カスタムコールバック ---
 class EpisodeLoggerCallback(BaseCallback):
     def __init__(self, total_episodes: int, verbose=0):
         super().__init__(verbose)
@@ -27,19 +25,15 @@ class EpisodeLoggerCallback(BaseCallback):
             self.episode_count += 1
             self.episode_rewards.append(self.current_ep_reward)
             self.current_ep_reward = 0.0 
-            
             if self.episode_count >= self.total_episodes:
                 return False
         return True
 
-# --- 各種関数 ---
 def learn_td3(env):
     model = TD3("MlpPolicy", env, verbose=1)
     callback = EpisodeLoggerCallback(total_episodes=config.TOTAL_EPISODES)
-    
     max_possible_timesteps = config.TOTAL_EPISODES * config.MAX_STEPS_PER_EPISODE
     model.learn(total_timesteps=max_possible_timesteps, callback=callback)
-    
     model.save(os.path.join(config.OUTPUT_DIR, "simple_td3_model"))
     return model, callback.episode_rewards
 
@@ -51,16 +45,21 @@ def draw_score(now_time, rewards):
     plt.ylabel("Cumulative Reward")
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.legend()
-    
     img_path = os.path.join(config.OUTPUT_DIR, f"score_{now_time}.png")
     plt.savefig(img_path)
     plt.close()
     print(f"学習スコアの画像を保存しました: {img_path}")
 
 def save_result(now_time, model, env):
+    num_jammers = env.unwrapped.num_jammers
     with open(os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv"), "w", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow(["step", "agent_x", "agent_y", "jammer_x", "jammer_y"])
+        
+        # ジャマーの数に合わせてCSVのヘッダーを動的に生成
+        header = ["step", "agent_x", "agent_y"]
+        for i in range(num_jammers):
+            header.extend([f"j{i}_x", f"j{i}_y"])
+        writer.writerow(header)
         
         obs, _ = env.reset()
         start_pos = np.array(config.AGENT_START_POS, dtype=np.float32)
@@ -71,7 +70,13 @@ def save_result(now_time, model, env):
             action, _ = model.predict(obs, deterministic=True)
             obs, _, finish_flag, over_step_flag, _ = env.step(action)
             
-            writer.writerow([i, obs[0], obs[1], obs[2], obs[3]]) 
+            # obsからデータを抽出して行を作成
+            row_data = [i, obs[0], obs[1]]
+            for j in range(num_jammers):
+                # 0,1はエージェント。ジャマーのx,yは2から2個ずつ格納されている
+                row_data.extend([obs[2 + j*2], obs[3 + j*2]])
+            
+            writer.writerow(row_data) 
             if finish_flag or over_step_flag:
                 break
 
@@ -79,28 +84,40 @@ def draw_from_csv(now_time):
     csv_path = os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv")
 
     x_history, y_history = [], []
-    jammer_x_history, jammer_y_history = [], []
+    jammer_histories = {} 
     
     with open(csv_path, "r") as file:
         reader = csv.reader(file)
-        next(reader) 
+        header = next(reader) 
+        # ヘッダーの列数からジャマーの数を逆算
+        num_jammers = (len(header) - 3) // 2
+        
+        for i in range(num_jammers):
+            jammer_histories[i] = {'x': [], 'y': []}
+            
         for row in reader:
             x_history.append(float(row[1]))
             y_history.append(float(row[2]))
-            jammer_x_history.append(float(row[3]))
-            jammer_y_history.append(float(row[4]))
+            for i in range(num_jammers):
+                jammer_histories[i]['x'].append(float(row[3 + i*2]))
+                jammer_histories[i]['y'].append(float(row[4 + i*2]))
 
     plt.figure(figsize=(6, 6))
     plt.xlim(-2.0, 2.0)
     plt.ylim(-2.0, 2.0)
-
     plt.scatter(0, 0, color='red', marker='*', s=200, label='Goal (0,0)')
 
-    plt.plot(jammer_x_history, jammer_y_history, color='orange', linestyle='--', linewidth=2.0, label='Jammer Trajectory')
-    
-    last_jx, last_jy = jammer_x_history[-1], jammer_y_history[-1]
-    obstacle_circle = patches.Circle((last_jx, last_jy), radius=config.OBSTACLE_RADIUS, color='grey', alpha=0.5, label='Jammer Final Pos')
-    plt.gca().add_patch(obstacle_circle)
+    # ジャマーの描画（複数いるため色を変えてプロット）
+    colors = ['orange', 'purple', 'cyan', 'brown', 'pink']
+    for i in range(num_jammers):
+        c = colors[i % len(colors)]
+        jx_hist = jammer_histories[i]['x']
+        jy_hist = jammer_histories[i]['y']
+        
+        plt.plot(jx_hist, jy_hist, color=c, linestyle='--', linewidth=2.0, label=f'Jammer {i+1} Traj')
+        last_jx, last_jy = jx_hist[-1], jy_hist[-1]
+        obstacle_circle = patches.Circle((last_jx, last_jy), radius=config.OBSTACLE_RADIUS, color='grey', alpha=0.5)
+        plt.gca().add_patch(obstacle_circle)
 
     plt.plot(x_history, y_history, color='blue', marker='.', linestyle='-', linewidth=1.5, label='Agent Trajectory')
     plt.scatter(x_history[0], y_history[0], color='green', marker='o', s=100, label='Start')
@@ -109,7 +126,10 @@ def draw_from_csv(now_time):
     plt.xlabel("X")
     plt.ylabel("Y")
     plt.grid(True, linestyle='--', alpha=0.7)
-    plt.legend()
+    
+    # 凡例がグラフに被らないように外側に配置
+    plt.legend(loc='upper left', bbox_to_anchor=(1.05, 1))
+    plt.tight_layout()
     
     img_path = os.path.join(config.OUTPUT_DIR, f"trajectory_{now_time}.png")
     plt.savefig(img_path)

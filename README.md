@@ -1,10 +1,9 @@
----
-
 ## 学習・推論 (Stable Baselines3)
 
 作成したカスタム環境でTD3エージェントを動かすための基本コードである。本プロジェクトでは、学習回数の管理や記録のためにカスタムコールバックも併用している。
 
-```python
+```
+
 from stable_baselines3 import TD3
 from my_jammer_env import MyJammerEnv
 import config
@@ -26,6 +25,7 @@ loaded_model = TD3.load("outputs/simple_td3_model")
 obs, _ = env.reset()
 # deterministic=True: 確率的要素を排除し、学習済みの最適な行動を選択
 action, _states = model.predict(obs, deterministic=True)
+
 ```
 
 ---
