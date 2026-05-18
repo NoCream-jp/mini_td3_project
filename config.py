@@ -18,7 +18,8 @@ JAMMER_CONFIGS = [
 JAMMER_CONFIGS = [
     {"pos": [1.0, 1.0], "speed": 0},
     {"pos": [0.0, 0.5], "speed": 0},
-    {"pos": [1.0, 0.5], "speed": 0}
+    {"pos": [1.0, 0.5], "speed": 0},
+    {"pos": [1.0, 0.0], "speed": 0}
 ]
 
 OBSTACLE_RADIUS = 0.2           # 障害物の判定半径

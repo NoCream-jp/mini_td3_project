@@ -106,6 +106,7 @@ outputs\trajectory_20260518_1959.png(2)
 outputs\trajectory_20260519_0045.png(2)
 outputs\trajectory_20260519_0131.png(2)
 outputs\trajectory_20260519_0452.png(3)
+outputs\trajectory_20260519_0522.png(4)
 
 それをみて障害物を動かしてみた回：
 
