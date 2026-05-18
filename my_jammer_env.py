@@ -38,17 +38,28 @@ class MyJammerEnv(gym.Env):
         
         # 観測空間の拡張: 自分のx,y(2) + (ジャマーの数 × x,y(2))
         obs_dim = 2 + (self.num_jammers * 2)
+        # 観測空間の定義
         self.observation_space = spaces.Box(low=-2.0, high=2.0, shape=(obs_dim,), dtype=np.float32)
+        ## actionの空間の制限定義
         self.action_space = spaces.Box(low=-0.1, high=0.1, shape=(2,), dtype=np.float32)
         
         self.location = np.zeros(2, dtype=np.float32)
         self.jammers = [] # 複数のジャマーを入れるリスト
-        
+
         self.steps_limit_with_learning = config.MAX_STEPS_PER_EPISODE
         self.current_step = 0
         self.obstacle_radius = config.OBSTACLE_RADIUS
         self.goal_tol_m = config.GOAL_TOLERANCE
 
+    # リセット関数
+    f"""
+    エピソード毎に呼ばれる関数で、
+    - config内のデータでjammerを初期化する
+    - location(エージェントの座標)とjammerの座標とが被っていないかチェックする
+    をする。戻り値は
+    _get_obs() -> [(エージェントの座標), (jammer_1の座標), (jammer_2の座標), ...] と 仕様上の空集合
+
+    """
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.current_step = 0
@@ -60,7 +71,8 @@ class MyJammerEnv(gym.Env):
             jam.psi = float(self.np_random.uniform(-np.pi, np.pi))
             self.jammers.append(jam)
 
-        while True:
+        max_spawn_attempts = 10_000
+        for _ in range(max_spawn_attempts):
             self.location = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
             # すべてのジャマーとの距離を測り、どれか1つでも被っていたらリトライ
             collision = False
@@ -71,6 +83,11 @@ class MyJammerEnv(gym.Env):
                     break
             if not collision:
                 break
+        else:
+            raise RuntimeError(
+                "Could not sample a start position that avoids all jammers. "
+                "Reduce OBSTACLE_RADIUS or adjust JAMMER_CONFIGS."
+            )
 
         return self._get_obs(), {}
 

@@ -10,6 +10,9 @@ import matplotlib.patches as patches
 import config
 from my_jammer_env import MyJammerEnv
 
+# ノイズインポート
+from stable_baselines3.common.noise import NormalActionNoise
+
 # コールバック関数
 ## データロガー
 class EpisodeLoggerCallback(BaseCallback):
@@ -33,8 +36,11 @@ class EpisodeLoggerCallback(BaseCallback):
         return True
 
 def learn_td3(env):    
+    # ノイズ設定(ランダム性を持たせる設定)
+    n_actions = env.action_space.shape[-1]
+    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.1 * np.ones(n_actions))
     # モデル用意
-    model = TD3("MlpPolicy", env, verbose=1)
+    model = TD3("MlpPolicy", env, action_noise=action_noise, verbose=1)
     # コールバック用意
     callback = EpisodeLoggerCallback(total_episodes=config.TOTAL_EPISODES)
     # タイムステップ上限設定
@@ -58,6 +64,13 @@ def draw_score(now_time, rewards):
     plt.close()
     print(f"学習スコアの画像を保存しました: {img_path}")
 
+# テストエピソードを回すために呼ばれる関数
+"""
+- csvに保存(csvファイルには本番テスト結果しか入っていない)
+- reset()
+- config.MAX_STEPS_PER_EPISODEまたは終了条件まで繰り返しstep()
+- 
+"""
 def save_result(now_time, model, env):
     num_jammers = env.unwrapped.num_jammers
     with open(os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv"), "w", newline="") as file:
@@ -75,7 +88,10 @@ def save_result(now_time, model, env):
         obs[0], obs[1] = start_pos[0], start_pos[1]
         
         for i in range(config.MAX_STEPS_PER_EPISODE):
+            # 次の動きをmodelから自動計算
+            ## deterministic = Trueで決定論的な動きに設定できる(ノイズを除去できる)
             action, _ = model.predict(obs, deterministic=True)
+            # stepを進める
             obs, _, finish_flag, over_step_flag, _ = env.step(action)
             
             # obsからデータを抽出して行を作成
@@ -88,6 +104,7 @@ def save_result(now_time, model, env):
             if finish_flag or over_step_flag:
                 break
 
+# 最後のテスト試行で生成したcsvから描画する関数
 def draw_from_csv(now_time):
     csv_path = os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv")
 
@@ -96,19 +113,26 @@ def draw_from_csv(now_time):
     
     with open(csv_path, "r") as file:
         reader = csv.reader(file)
-        header = next(reader) 
+        header = next(reader)
+        if len(header) < 3:
+            raise ValueError(f"Invalid CSV header in {csv_path}")
         # ヘッダーの列数からジャマーの数を逆算
         num_jammers = (len(header) - 3) // 2
-        
+
         for i in range(num_jammers):
             jammer_histories[i] = {'x': [], 'y': []}
-            
+
         for row in reader:
+            if len(row) < 3 + num_jammers * 2:
+                continue
             x_history.append(float(row[1]))
             y_history.append(float(row[2]))
             for i in range(num_jammers):
                 jammer_histories[i]['x'].append(float(row[3 + i*2]))
                 jammer_histories[i]['y'].append(float(row[4 + i*2]))
+
+    if not x_history:
+        raise ValueError(f"No trajectory data in {csv_path}")
 
     plt.figure(figsize=(6, 6))
     plt.xlim(-2.0, 2.0)
@@ -144,16 +168,23 @@ def draw_from_csv(now_time):
     plt.close()
     print(f"軌跡の画像を保存しました: {img_path}")
 
+
 def main():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+
+    # 環境をインスタンス化
     env = MyJammerEnv()
     
+    # 学習
     model, rewards_history = learn_td3(env)
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
-    
+
+    # 描画
     draw_score(now_time, rewards_history)
     save_result(now_time, model, env)
     draw_from_csv(now_time)
+
+
 
 if __name__ == "__main__":
     main()
