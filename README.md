@@ -91,8 +91,8 @@ mini_td3_project/
 ├── main.py                 # 学習の実行、テスト走行、グラフ描画を統括するメインスクリプト
 ├── outputs/                # プログラム実行により自動生成される成果物(gitignoreで除外)
 │   ├── simple_td3_model.zip# 学習済みモデル（ニューラルネットワークの重み）
-│   ├── test_YYYY...csv     # テスト走行時のエージェントとジャマーの座標ログ
 │   ├── score_YYYY...png    # 学習曲線（エピソードごとの累積報酬の推移グラフ）
+│   ├── test_YYYY...csv     # テスト走行時のエージェントとジャマーの座標ログ
 │   └── trajectory_YYYY...png # テスト走行の軌跡と、ジャマーの動きを可視化した画像
 ├── .gitignore              # Git管理から除外するファイルの設定
 └── README.md               # 本ファイル（プロジェクトの説明書）
@@ -104,5 +104,5 @@ mini_td3_project/
 
 outputs\trajectory_20260518_1959.png
 outputs\trajectory_20260519_0045.png
-
+outputs\trajectory_20260519_0131.png
 それをみて障害物を動かしてみた回：

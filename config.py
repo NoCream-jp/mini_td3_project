@@ -2,8 +2,8 @@ import os
 
 OUTPUT_DIR = "outputs"
 
-TOTAL_EPISODES = 400            # 学習する総エピソード数
-MAX_STEPS_PER_EPISODE = 400     # 1エピソードの最大ステップ数
+TOTAL_EPISODES = 600            # 学習する総エピソード数
+MAX_STEPS_PER_EPISODE = 600     # 1エピソードの最大ステップ数
 
 AGENT_START_POS = [1.9, 1.9]    # テスト時のエージェントのスタート位置
 
