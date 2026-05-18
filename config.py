@@ -17,10 +17,11 @@ JAMMER_CONFIGS = [
 # スピードをなくして静止させた状態でテストする
 JAMMER_CONFIGS = [
     {"pos": [1.0, 1.0], "speed": 0},
-    {"pos": [0.0, 0.5], "speed": 0}
+    {"pos": [0.0, 0.5], "speed": 0},
+    {"pos": [1.0, 0.5], "speed": 0}
 ]
 
-OBSTACLE_RADIUS = 0.3           # 障害物の判定半径
+OBSTACLE_RADIUS = 0.2           # 障害物の判定半径
 GOAL_TOLERANCE = 0.1            # ゴール判定の距離
 
 # ----- 報酬　-----

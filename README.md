@@ -102,7 +102,11 @@ mini_td3_project/
 
 うまくいった静止障害物を設置した回：
 
-outputs\trajectory_20260518_1959.png
-outputs\trajectory_20260519_0045.png
-outputs\trajectory_20260519_0131.png
+outputs\trajectory_20260518_1959.png(2)
+outputs\trajectory_20260519_0045.png(2)
+outputs\trajectory_20260519_0131.png(2)
+outputs\trajectory_20260519_0452.png(3)
+
 それをみて障害物を動かしてみた回：
+
+状態予測の詳細：
