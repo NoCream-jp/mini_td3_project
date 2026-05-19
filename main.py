@@ -38,7 +38,7 @@ class EpisodeLoggerCallback(BaseCallback):
 def learn_td3(env):    
     # ノイズ設定(ランダム性を持たせる設定)
     n_actions = env.action_space.shape[-1]
-    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.1 * np.ones(n_actions))
+    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.3 * np.ones(n_actions))
     # モデル用意
     model = TD3("MlpPolicy", env, action_noise=action_noise, verbose=1)
     # コールバック用意
