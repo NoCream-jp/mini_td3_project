@@ -64,12 +64,11 @@ def draw_score(now_time, rewards):
     plt.close()
     print(f"学習スコアの画像を保存しました: {img_path}")
 
-# テストエピソードを回すために呼ばれる関数
+# テストエピソード(1周だけ)を回し、記録するために呼ばれる関数
 """
 - csvに保存(csvファイルには本番テスト結果しか入っていない)
 - reset()
 - config.MAX_STEPS_PER_EPISODEまたは終了条件まで繰り返しstep()
-- 
 """
 def save_result(now_time, model, env):
     num_jammers = env.unwrapped.num_jammers
@@ -97,7 +96,7 @@ def save_result(now_time, model, env):
             # obsからデータを抽出して行を作成
             row_data = [i, obs[0], obs[1]]
             for j in range(num_jammers):
-                # 0,1はエージェント。ジャマーのx,yは2から2個ずつ格納されている
+                # 0,1番目はエージェント。ジャマーのx,yは2から2個ずつ格納されている
                 row_data.extend([obs[2 + j*2], obs[3 + j*2]])
             
             writer.writerow(row_data) 

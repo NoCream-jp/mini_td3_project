@@ -17,17 +17,25 @@ class JammerState:
         
     def update(self):
         """
-        ジャマー自身に次の座標を計算させる（スッキリさせるための工夫）
-        ジャマーの軌道：
+        ジャマーの軌道：向いている方向(psi)へ直進し、壁(-2.0 ~ 2.0)で反射する
         """
-        orbit_radius = math.hypot(self.x, self.y)
-        if orbit_radius > 1e-5:
-            current_angle = math.atan2(self.y, self.x)
-            angular_speed = self.v / orbit_radius
-            new_angle = current_angle + angular_speed
-            self.x = orbit_radius * math.cos(new_angle)
-            self.y = orbit_radius * math.sin(new_angle)
-            self.psi = new_angle + (math.pi / 2.0)
+        # 1. 次の座標を計算
+        next_x = self.x + self.v * math.cos(self.psi)
+        next_y = self.y + self.v * math.sin(self.psi)
+        
+        # 2. X軸の壁（-2.0 または 2.0）にぶつかったら反射
+        if next_x < -2.0 or next_x > 2.0:
+            self.psi = math.pi - self.psi  # 左右の反射（角度を反転）
+            next_x = np.clip(next_x, -2.0, 2.0)
+            
+        # 3. Y軸の壁（-2.0 または 2.0）にぶつかったら反射
+        if next_y < -2.0 or next_y > 2.0:
+            self.psi = -self.psi           # 上下の反射（角度を反転）
+            next_y = np.clip(next_y, -2.0, 2.0)
+            
+        # 4. 座標を確定
+        self.x = next_x
+        self.y = next_y
 
 # 環境定義
 class MyJammerEnv(gym.Env):
