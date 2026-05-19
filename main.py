@@ -85,7 +85,7 @@ def save_result(now_time, model, env):
         obs, _ = env.reset()
         start_pos = np.array(config.AGENT_START_POS, dtype=np.float32)
         env.unwrapped.location = start_pos
-        obs[0], obs[1] = start_pos[0], start_pos[1]
+        obs = env.unwrapped._get_obs()
         
         for i in range(config.MAX_STEPS_PER_EPISODE):
             # 次の動きをmodelから自動計算
