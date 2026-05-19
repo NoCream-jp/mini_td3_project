@@ -75,12 +75,13 @@ def save_result(now_time, model, env):
     with open(os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv"), "w", newline="") as file:
         writer = csv.writer(file)
         
-        # ジャマーの数に合わせてCSVのヘッダーを動的に生成
+        # ジャマーの数に合わせてCSVのヘッダー生成
         header = ["step", "agent_x", "agent_y"]
         for i in range(num_jammers):
             header.extend([f"j{i}_x", f"j{i}_y"])
         writer.writerow(header)
         
+        # いったん初期化
         obs, _ = env.reset()
         start_pos = np.array(config.AGENT_START_POS, dtype=np.float32)
         env.unwrapped.location = start_pos
@@ -178,8 +179,9 @@ def main():
     model, rewards_history = learn_td3(env)
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 
-    # 描画
+    # 学習時のスコアの描画
     draw_score(now_time, rewards_history)
+    # テストと描画
     save_result(now_time, model, env)
     draw_from_csv(now_time)
 
