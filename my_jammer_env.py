@@ -12,28 +12,28 @@ class JammerState:
     def __init__(self, x, y, speed):
         self.x = x
         self.y = y
-        self.psi = 0.0 # 向き
+        self.psi = 0.0 # 向きの初期値 reset()のほうでインスタンス化のあとに上書きすれば当然書き変わる。
         self.v = speed
         
     def update(self):
         """
         ジャマーの軌道：向いている方向(psi)へ直進し、壁(-2.0 ~ 2.0)で反射する
         """
-        # 1. 次の座標を計算
+        # 1. 向いている方向(psi)へ、スピード(v)の分だけ座標を進める
         next_x = self.x + self.v * math.cos(self.psi)
         next_y = self.y + self.v * math.sin(self.psi)
         
-        # 2. X軸の壁（-2.0 または 2.0）にぶつかったら反射
+        # 2. X軸の壁（左右の壁）にぶつかったら反射
         if next_x < -2.0 or next_x > 2.0:
             self.psi = math.pi - self.psi  # 左右の反射（角度を反転）
             next_x = np.clip(next_x, -2.0, 2.0)
             
-        # 3. Y軸の壁（-2.0 または 2.0）にぶつかったら反射
+        # 3. Y軸の壁（上下の壁）にぶつかったら反射
         if next_y < -2.0 or next_y > 2.0:
             self.psi = -self.psi           # 上下の反射（角度を反転）
             next_y = np.clip(next_y, -2.0, 2.0)
             
-        # 4. 座標を確定
+        # 4. 新しい座標を確定
         self.x = next_x
         self.y = next_y
 
@@ -76,7 +76,7 @@ class MyJammerEnv(gym.Env):
         self.jammers = []
         for j_conf in config.JAMMER_CONFIGS:
             jam = JammerState(x=j_conf["pos"][0], y=j_conf["pos"][1], speed=j_conf["speed"])
-            jam.psi = float(self.np_random.uniform(-np.pi, np.pi))
+            jam.psi = math.radians(j_conf.get("angle", 0.0))
             self.jammers.append(jam)
 
         max_spawn_attempts = 10_000
