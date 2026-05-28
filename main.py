@@ -11,7 +11,7 @@ import matplotlib.patches as patches
 # 自作ファイルインポート
 import config
 from my_jammer_env import MyJammerEnv
-from my_wrappers import TrajectoryPredictionWrapper
+from my_wrappers import TrajectoryPredictionWrapper, SafetyShieldWrapper
 
 # ノイズインポート
 from stable_baselines3.common.noise import NormalActionNoise
@@ -199,11 +199,14 @@ def draw_from_csv(now_time, prediction_snapshots=None):
 def main():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 
-    # 環境をインスタンス化
+    # 1. まず生の環境を作成
     raw_env = MyJammerEnv()
-    env = TrajectoryPredictionWrapper(raw_env, history_length=5, horizon_steps=20)
     
-    # 学習
+    # 2. 予測ラッパーを着せる（裏側で予測データを計算する）
+    # 3. シールドラッパーを着せる（予測データを使って安全確保する）
+    env = TrajectoryPredictionWrapper(raw_env, history_length=5, horizon_steps=20)
+    # ※安全な距離障害物半径(0.2) + 余白(0.15) = 0.35
+    env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)# 学習
     model, rewards_history = learn_td3(env)
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 
