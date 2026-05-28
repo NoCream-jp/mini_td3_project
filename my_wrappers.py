@@ -100,7 +100,7 @@ class SafetyShieldWrapper(gym.Wrapper):
 
     def reset(self, seed=None, options=None):
         obs, info = self.env.reset(seed=seed, options=options)
-        # 環境が初期化された時の予測データを取得
+        # 環境が初期化された時の予d測データを取得
         self.latest_preds = info.get('jam_preds', [])
         return obs, info
 

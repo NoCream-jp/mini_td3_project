@@ -191,7 +191,7 @@ def draw_from_csv(now_time, prediction_snapshots=None):
     plt.tight_layout()
     
     img_path = os.path.join(config.OUTPUT_DIR, f"trajectory_{now_time}.png")
-    plt.savefig(img_path)
+    plt.savefig(img_path) 
     plt.close()
     print(f"軌跡の画像を保存しました: {img_path}")
 
@@ -204,9 +204,9 @@ def main():
     
     # 2. 予測ラッパーを着せる（裏側で予測データを計算する）
     # 3. シールドラッパーを着せる（予測データを使って安全確保する）
-    env = TrajectoryPredictionWrapper(raw_env, history_length=5, horizon_steps=20)
+    env = TrajectoryPredictionWrapper(raw_env, history_length=2, horizon_steps=20)
     # ※安全な距離障害物半径(0.2) + 余白(0.15) = 0.35
-    env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)# 学習
+    env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
     model, rewards_history = learn_td3(env)
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 

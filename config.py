@@ -3,7 +3,7 @@ import os
 OUTPUT_DIR = "outputs"
 
 TOTAL_EPISODES = 500            # 学習する総エピソード数
-MAX_STEPS_PER_EPISODE = 300     # 1エピソードの最大ステップ数
+MAX_STEPS_PER_EPISODE = 400     # 1エピソードの最大ステップ数
 
 AGENT_START_POS = [2.0, 2.0]    # テスト時のエージェントのスタート位置
 GOAL_POS = [-2.0, -2.0]         # エージェントが目指す終点
