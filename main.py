@@ -7,8 +7,10 @@ from stable_baselines3.common.callbacks import BaseCallback
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
+# 自作ファイルインポート
 import config
 from my_jammer_env import MyJammerEnv
+from my_wrappers import TrajectoryPredictionWrapper
 
 # ノイズインポート
 from stable_baselines3.common.noise import NormalActionNoise
@@ -175,7 +177,8 @@ def main():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 
     # 環境をインスタンス化
-    env = MyJammerEnv()
+    raw_env = MyJammerEnv()
+    env = TrajectoryPredictionWrapper(raw_env, history_length=5, horizon_steps=20)
     
     # 学習
     model, rewards_history = learn_td3(env)
