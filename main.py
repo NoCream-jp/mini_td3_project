@@ -70,7 +70,7 @@ def draw_score(now_time, rewards):
 - reset()
 - config.MAX_STEPS_PER_EPISODEまたは終了条件まで繰り返しstep()
 """
-def save_result(now_time, model, env):
+def actual_test(now_time, model, env):
     num_jammers = env.unwrapped.num_jammers
     with open(os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv"), "w", newline="") as file:
         writer = csv.writer(file)
@@ -184,7 +184,7 @@ def main():
     # 学習時のスコアの描画
     draw_score(now_time, rewards_history)
     # テストと描画
-    save_result(now_time, model, env)
+    actual_test(now_time, model, env)
     draw_from_csv(now_time)
 
 
