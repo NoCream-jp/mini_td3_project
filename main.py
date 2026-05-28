@@ -137,7 +137,9 @@ def draw_from_csv(now_time):
     plt.figure(figsize=(6, 6))
     plt.xlim(-2.0, 2.0)
     plt.ylim(-2.0, 2.0)
-    plt.scatter(0, 0, color='red', marker='*', s=200, label='Goal (0,0)')
+    plt.gca().set_aspect('equal')
+    gx, gy = config.GOAL_POS
+    plt.scatter(gx, gy, color='red', marker='*', s=200, label=f'Goal ({gx}, {gy})')
 
     # ジャマーの描画（複数いるため色を変えてプロット）
     colors = ['orange', 'purple', 'cyan', 'brown', 'pink']
@@ -184,7 +186,6 @@ def main():
     # テストと描画
     save_result(now_time, model, env)
     draw_from_csv(now_time)
-
 
 
 if __name__ == "__main__":
