@@ -199,14 +199,19 @@ def draw_from_csv(now_time, prediction_snapshots=None):
 def main():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 
-    # 1. まず生の環境を作成
+    # まず生の環境を作成
     raw_env = MyJammerEnv()
     
-    # 2. 予測ラッパーを着せる（裏側で予測データを計算する）
-    # 3. シールドラッパーを着せる（予測データを使って安全確保する）
-    env = TrajectoryPredictionWrapper(raw_env, history_length=2, horizon_steps=20)
+    # 予測ラッパーを着せる（裏側で予測データを計算する）
+    # シールドラッパーを着せる（予測データを使って安全確保する）
     # ※安全な距離障害物半径(0.2) + 余白(0.15) = 0.35
+    env = TrajectoryPredictionWrapper(raw_env, history_length=2, horizon_steps=20)
     env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
+
+    # ラッパーなしならこっちを使う
+    # env = raw_env
+
+    # 環境envを利用して学習を実行する
     model, rewards_history = learn_td3(env)
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 
