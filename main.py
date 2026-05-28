@@ -2,13 +2,16 @@ import datetime
 import os
 import csv
 import numpy as np
+import copy
 from stable_baselines3 import TD3
 from stable_baselines3.common.callbacks import BaseCallback
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
+# 自作ファイルインポート
 import config
 from my_jammer_env import MyJammerEnv
+from my_wrappers import TrajectoryPredictionWrapper, SafetyShieldWrapper
 
 # ノイズインポート
 from stable_baselines3.common.noise import NormalActionNoise
@@ -65,47 +68,52 @@ def draw_score(now_time, rewards):
     print(f"学習スコアの画像を保存しました: {img_path}")
 
 # テストエピソード(1周だけ)を回し、記録するために呼ばれる関数
-"""
-- csvに保存(csvファイルには本番テスト結果しか入っていない)
-- reset()
-- config.MAX_STEPS_PER_EPISODEまたは終了条件まで繰り返しstep()
-"""
-def save_result(now_time, model, env):
+def actual_test(now_time, model, env):
     num_jammers = env.unwrapped.num_jammers
+    prediction_snapshots = []
+    
     with open(os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv"), "w", newline="") as file:
         writer = csv.writer(file)
         
-        # ジャマーの数に合わせてCSVのヘッダー生成
         header = ["step", "agent_x", "agent_y"]
         for i in range(num_jammers):
             header.extend([f"j{i}_x", f"j{i}_y"])
         writer.writerow(header)
         
-        # いったん初期化
-        obs, _ = env.reset()
-        start_pos = np.array(config.AGENT_START_POS, dtype=np.float32)
-        env.unwrapped.location = start_pos
-        obs = env.unwrapped._get_obs()
+        # 修正：無理な上書きをすべて廃止し、この1行だけで完璧に同期させて初期化する
+        obs, info = env.reset(options={"start_pos": config.AGENT_START_POS})
         
         for i in range(config.MAX_STEPS_PER_EPISODE):
-            # 次の動きをmodelから自動計算
-            ## deterministic = Trueで決定論的な動きに設定できる(ノイズを除去できる)
             action, _ = model.predict(obs, deterministic=True)
+            
+            # 30ステップごとに、純粋な数値を複製してメモリに保存
+            if i % 30 == 0 and 'jam_preds' in info:
+                agent_pos = (env.unwrapped.location[0], env.unwrapped.location[1])
+                prediction_snapshots.append({
+                    "step": i,
+                    "agent_pos": agent_pos,
+                    "preds": copy.deepcopy(info['jam_preds'])
+                })
+            
             # stepを進める
-            obs, _, finish_flag, over_step_flag, _ = env.step(action)
+            obs, _, finish_flag, over_step_flag, info = env.step(action)
             
             # obsからデータを抽出して行を作成
             row_data = [i, obs[0], obs[1]]
             for j in range(num_jammers):
-                # 0,1番目はエージェント。ジャマーのx,yは2から2個ずつ格納されている
                 row_data.extend([obs[2 + j*2], obs[3 + j*2]])
             
             writer.writerow(row_data) 
+            
+            # ここで激突（finish_flag）したら、即座にループを抜けてログ保存を終了する
             if finish_flag or over_step_flag:
+                print(f"★本番テスト：ステップ {i} で衝突判定、または終了条件を検知しました。")
                 break
+                
+    return prediction_snapshots
 
 # 最後のテスト試行で生成したcsvから描画する関数
-def draw_from_csv(now_time):
+def draw_from_csv(now_time, prediction_snapshots=None):
     csv_path = os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv")
 
     x_history, y_history = [], []
@@ -116,7 +124,6 @@ def draw_from_csv(now_time):
         header = next(reader)
         if len(header) < 3:
             raise ValueError(f"Invalid CSV header in {csv_path}")
-        # ヘッダーの列数からジャマーの数を逆算
         num_jammers = (len(header) - 3) // 2
 
         for i in range(num_jammers):
@@ -134,12 +141,14 @@ def draw_from_csv(now_time):
     if not x_history:
         raise ValueError(f"No trajectory data in {csv_path}")
 
-    plt.figure(figsize=(6, 6))
+    plt.figure(figsize=(8, 6))
     plt.xlim(-2.0, 2.0)
     plt.ylim(-2.0, 2.0)
-    plt.scatter(0, 0, color='red', marker='*', s=200, label='Goal (0,0)')
+    plt.gca().set_aspect('equal')
+    gx, gy = config.GOAL_POS
+    plt.scatter(gx, gy, color='red', marker='*', s=200, label=f'Goal ({gx}, {gy})', zorder=5)
 
-    # ジャマーの描画（複数いるため色を変えてプロット）
+    # ジャマーの描画
     colors = ['orange', 'purple', 'cyan', 'brown', 'pink']
     for i in range(num_jammers):
         c = colors[i % len(colors)]
@@ -148,23 +157,41 @@ def draw_from_csv(now_time):
         
         plt.plot(jx_hist, jy_hist, color=c, linestyle='--', linewidth=2.0, label=f'Jammer {i+1} Traj')
         last_jx, last_jy = jx_hist[-1], jy_hist[-1]
-        obstacle_circle = patches.Circle((last_jx, last_jy), radius=config.OBSTACLE_RADIUS, color='grey', alpha=0.5)
+        obstacle_circle = patches.Circle((last_jx, last_jy), radius=config.OBSTACLE_RADIUS, color='grey', alpha=0.5, zorder=3)
         plt.gca().add_patch(obstacle_circle)
 
-    plt.plot(x_history, y_history, color='blue', marker='.', linestyle='-', linewidth=1.5, label='Agent Trajectory')
-    plt.scatter(x_history[0], y_history[0], color='green', marker='o', s=100, label='Start')
+    # エージェントの軌跡描画
+    plt.plot(x_history, y_history, color='blue', marker='.', linestyle='-', linewidth=1.5, label='Agent Trajectory', zorder=4)
+    plt.scatter(x_history[0], y_history[0], color='green', marker='o', s=100, label='Start', zorder=5)
     
+    # ★変更：引数で直接受け取ったメモリ上の予測リストを展開して描画
+    if prediction_snapshots is not None:
+        for idx, shot in enumerate(prediction_snapshots):
+            a_pos = shot["agent_pos"]
+            all_jam_preds = shot["preds"]
+            
+            # 予測が行われた位置に小さな黒丸を打つ
+            plt.scatter(a_pos[0], a_pos[1], color='black', marker='o', s=25, zorder=5)
+            
+            # 予測軌道を描画
+            for jam_idx, pred_traj in enumerate(all_jam_preds):
+                px = [pt[0] for pt in pred_traj]
+                py = [pt[1] for pt in pred_traj]
+                
+                label = "Jammer Prediction" if idx == 0 and jam_idx == 0 else ""
+                plt.plot(px, py, color='darkorange', linestyle=':', alpha=0.7, linewidth=1.8, label=label, zorder=2)
+
     plt.title(f"Dynamic Jammer Evasion ({now_time})")
     plt.xlabel("X")
     plt.ylabel("Y")
     plt.grid(True, linestyle='--', alpha=0.7)
     
-    # 凡例がグラフに被らないように外側に配置
+    # 凡例を外側に配置
     plt.legend(loc='upper left', bbox_to_anchor=(1.05, 1))
     plt.tight_layout()
     
     img_path = os.path.join(config.OUTPUT_DIR, f"trajectory_{now_time}.png")
-    plt.savefig(img_path)
+    plt.savefig(img_path) 
     plt.close()
     print(f"軌跡の画像を保存しました: {img_path}")
 
@@ -172,19 +199,30 @@ def draw_from_csv(now_time):
 def main():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 
-    # 環境をインスタンス化
-    env = MyJammerEnv()
+    # まず生の環境を作成
+    raw_env = MyJammerEnv()
     
-    # 学習
+    # 予測ラッパーを着せる（裏側で予測データを計算する）
+    # シールドラッパーを着せる（予測データを使って安全確保する）
+    # ※安全な距離障害物半径(0.2) + 余白(0.15) = 0.35
+    env = TrajectoryPredictionWrapper(raw_env, history_length=2, horizon_steps=20)
+    env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
+
+    # ラッパーなしならこっちを使う
+    # env = raw_env
+
+    # 環境envを利用して学習を実行する
     model, rewards_history = learn_td3(env)
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 
     # 学習時のスコアの描画
     draw_score(now_time, rewards_history)
-    # テストと描画
-    save_result(now_time, model, env)
-    draw_from_csv(now_time)
-
+    
+    # actual_test から予測リストを受け取る
+    pred_snapshots = actual_test(now_time, model, env)
+    
+    # 受け取ったリストをそのまま draw_from_csv に引き渡す
+    draw_from_csv(now_time, pred_snapshots)
 
 
 if __name__ == "__main__":
