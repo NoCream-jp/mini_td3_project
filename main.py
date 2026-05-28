@@ -3,7 +3,6 @@ import os
 import csv
 import numpy as np
 import copy
-import pickle
 from stable_baselines3 import TD3
 from stable_baselines3.common.callbacks import BaseCallback
 import matplotlib.pyplot as plt
@@ -18,7 +17,7 @@ from my_wrappers import TrajectoryPredictionWrapper
 from stable_baselines3.common.noise import NormalActionNoise
 
 # コールバック関数
-## データロガー用
+## データロガー
 class EpisodeLoggerCallback(BaseCallback):
     def __init__(self, total_episodes: int, verbose=0):
         super().__init__(verbose)
@@ -71,40 +70,33 @@ def draw_score(now_time, rewards):
 # テストエピソード(1周だけ)を回し、記録するために呼ばれる関数
 def actual_test(now_time, model, env):
     num_jammers = env.unwrapped.num_jammers
-    
-    # ★追加：予測軌道（スナップショット）を保存するリスト
     prediction_snapshots = []
     
     with open(os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv"), "w", newline="") as file:
         writer = csv.writer(file)
         
-        # ジャマーの数に合わせてCSVのヘッダー生成
         header = ["step", "agent_x", "agent_y"]
         for i in range(num_jammers):
             header.extend([f"j{i}_x", f"j{i}_y"])
         writer.writerow(header)
         
-        # いったん初期化
-        obs, info = env.reset() # ラッパー側からinfoを受け取る
-        start_pos = np.array(config.AGENT_START_POS, dtype=np.float32)
-        env.unwrapped.location = start_pos
-        obs = env.unwrapped._get_obs()
+        # 修正：無理な上書きをすべて廃止し、この1行だけで完璧に同期させて初期化する
+        obs, info = env.reset(options={"start_pos": config.AGENT_START_POS})
         
         for i in range(config.MAX_STEPS_PER_EPISODE):
-            # 次の動きをmodelから自動計算
             action, _ = model.predict(obs, deterministic=True)
             
-            # 30ステップごとに「その瞬間に作成した未来の予測」をスナップショットとして保存
+            # 30ステップごとに、純粋な数値を複製してメモリに保存
             if i % 30 == 0 and 'jam_preds' in info:
                 agent_pos = (env.unwrapped.location[0], env.unwrapped.location[1])
                 prediction_snapshots.append({
                     "step": i,
                     "agent_pos": agent_pos,
-                    "preds": copy.deepcopy(info['jam_preds']) # 参照渡しを避けるためディープコピー
+                    "preds": copy.deepcopy(info['jam_preds'])
                 })
             
             # stepを進める
-            obs, _, finish_flag, over_step_flag, info = env.step(action) # ★修正: infoを上書き更新していく
+            obs, _, finish_flag, over_step_flag, info = env.step(action)
             
             # obsからデータを抽出して行を作成
             row_data = [i, obs[0], obs[1]]
@@ -112,16 +104,16 @@ def actual_test(now_time, model, env):
                 row_data.extend([obs[2 + j*2], obs[3 + j*2]])
             
             writer.writerow(row_data) 
+            
+            # ここで激突（finish_flag）したら、即座にループを抜けてログ保存を終了する
             if finish_flag or over_step_flag:
+                print(f"★本番テスト：ステップ {i} で衝突判定、または終了条件を検知しました。")
                 break
                 
-    # 予測スナップショットを pickle で保存する
-    pred_pkl_path = os.path.join(config.OUTPUT_DIR, f"test_{now_time}_preds.pkl")
-    with open(pred_pkl_path, "wb") as f:
-        pickle.dump(prediction_snapshots, f)
+    return prediction_snapshots
 
 # 最後のテスト試行で生成したcsvから描画する関数
-def draw_from_csv(now_time):
+def draw_from_csv(now_time, prediction_snapshots=None):
     csv_path = os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv")
 
     x_history, y_history = [], []
@@ -149,7 +141,6 @@ def draw_from_csv(now_time):
     if not x_history:
         raise ValueError(f"No trajectory data in {csv_path}")
 
-    # ★修正：凡例を綺麗に収めるためにキャンバスのサイズを少し横長 (8, 6) に変更
     plt.figure(figsize=(8, 6))
     plt.xlim(-2.0, 2.0)
     plt.ylim(-2.0, 2.0)
@@ -157,7 +148,7 @@ def draw_from_csv(now_time):
     gx, gy = config.GOAL_POS
     plt.scatter(gx, gy, color='red', marker='*', s=200, label=f'Goal ({gx}, {gy})', zorder=5)
 
-    # ジャマーの描画（複数いるため色を変えてプロット）
+    # ジャマーの描画
     colors = ['orange', 'purple', 'cyan', 'brown', 'pink']
     for i in range(num_jammers):
         c = colors[i % len(colors)]
@@ -173,28 +164,21 @@ def draw_from_csv(now_time):
     plt.plot(x_history, y_history, color='blue', marker='.', linestyle='-', linewidth=1.5, label='Agent Trajectory', zorder=4)
     plt.scatter(x_history[0], y_history[0], color='green', marker='o', s=100, label='Start', zorder=5)
     
-    # 30ステップごとに保存した、jammerの予測軌道のスナップショットの描画
-    # pickleから読み込んで描画する
-    pred_pkl_path = os.path.join(config.OUTPUT_DIR, f"test_{now_time}_preds.pkl")
-    if os.path.exists(pred_pkl_path):
-        with open(pred_pkl_path, "rb") as f:
-            snapshots = pickle.load(f)
-            
-        for idx, shot in enumerate(snapshots):
+    # ★変更：引数で直接受け取ったメモリ上の予測リストを展開して描画
+    if prediction_snapshots is not None:
+        for idx, shot in enumerate(prediction_snapshots):
             a_pos = shot["agent_pos"]
             all_jam_preds = shot["preds"]
             
-            # 予測が行われたエージェントの位置に小さな黒丸を打つ
+            # 予測が行われた位置に小さな黒丸を打つ
             plt.scatter(a_pos[0], a_pos[1], color='black', marker='o', s=25, zorder=5)
             
-            # 各ジャマーに対して予測された軌道を引く
+            # 予測軌道を描画
             for jam_idx, pred_traj in enumerate(all_jam_preds):
                 px = [pt[0] for pt in pred_traj]
                 py = [pt[1] for pt in pred_traj]
                 
-                # 最初の1回だけ凡例（Label）に登録して、残りは重複を避けるため空にする
                 label = "Jammer Prediction" if idx == 0 and jam_idx == 0 else ""
-                # オレンジ色の破線、かつ実際の軌跡を邪魔しないように半透明(alpha=0.6)
                 plt.plot(px, py, color='darkorange', linestyle=':', alpha=0.7, linewidth=1.8, label=label, zorder=2)
 
     plt.title(f"Dynamic Jammer Evasion ({now_time})")
@@ -202,7 +186,7 @@ def draw_from_csv(now_time):
     plt.ylabel("Y")
     plt.grid(True, linestyle='--', alpha=0.7)
     
-    # 凡例がグラフに被らないように外側に配置
+    # 凡例を外側に配置
     plt.legend(loc='upper left', bbox_to_anchor=(1.05, 1))
     plt.tight_layout()
     
@@ -225,9 +209,12 @@ def main():
 
     # 学習時のスコアの描画
     draw_score(now_time, rewards_history)
-    # テストと描画
-    actual_test(now_time, model, env)
-    draw_from_csv(now_time)
+    
+    # actual_test から予測リストを受け取る
+    pred_snapshots = actual_test(now_time, model, env)
+    
+    # 受け取ったリストをそのまま draw_from_csv に引き渡す
+    draw_from_csv(now_time, pred_snapshots)
 
 
 if __name__ == "__main__":
