@@ -5,38 +5,63 @@ from gymnasium import spaces
 
 import config
 
+# "liner_cross"なら直線運動して壁で反射
+# そうでなければself.typeによって計算
+# 直線の計算とupdate_positionが分離してるのが気持ち悪い
 class JammerState:
     def __init__(self, config_dict):
-        # configの辞書をそのまま受け取って設定を展開する
         self.type = config_dict.get("type", "circle")
-        self.cx = config_dict.get("center", [0.0, 0.0])[0]
-        self.cy = config_dict.get("center", [0.0, 0.0])[1]
-        self.size = config_dict.get("size", 1.0)
         self.speed = config_dict.get("speed", 0.05)
         
-        # 内部時計（時間 t）として扱う。angleでスタート位置をずらせる。
-        self.t = math.radians(config_dict.get("angle", 0.0))
-        self.update_position()
+        # linear_cross用の初期化
+        if self.type == "linear_cross":
+            # 初期位置を固定（右下 [2.0, -2.0]）
+            self.x = 2.0
+            self.y = -2.0
+            # 進行方向ベクトル：右下(2,-2)から左上(-2,2)へ向かう単位ベクトル
+            # 方向は (-1, 1) なので、長さで割って正規化する
+            self.dir_x = -1.0 / math.sqrt(2.0)
+            self.dir_y = 1.0 / math.sqrt(2.0)
+        else:
+            # 既存の円・8の字用の初期化
+            self.cx = config_dict.get("center", [0.0, 0.0])[0]
+            self.cy = config_dict.get("center", [0.0, 0.0])[1]
+            self.size = config_dict.get("size", 1.0)
+            self.t = math.radians(config_dict.get("angle", 0.0))
+            self.x = 0.0
+            self.y = 0.0
+            self.update_position()
         
     def update(self):
-        """毎ステップ時間を進めて座標を再計算する"""
-        self.t += self.speed
-        self.update_position()
+        """毎ステップ座標を更新する"""
+        if self.type == "linear_cross":
+            # 進行方向へ速度分だけ進む
+            next_x = self.x + self.speed * self.dir_x
+            next_y = self.y + self.speed * self.dir_y
+            
+            # 壁（-2.0 または 2.0）に達したら進行方向を反転（往復パトロール）
+            if next_x < -2.0 or next_x > 2.0 or next_y < -2.0 or next_y > 2.0:
+                self.dir_x = -self.dir_x
+                self.dir_y = -self.dir_y
+                # 枠外にはみ出さないようにクリップ
+                next_x = np.clip(next_x, -2.0, 2.0)
+                next_y = np.clip(next_y, -2.0, 2.0)
+                
+            self.x = next_x
+            self.y = next_y
+        else:
+            # 既存の円・8の字の更新
+            self.t += self.speed
+            self.update_position()
 
     def update_position(self):
-        """時間に依存して幾何学的な軌道を描く"""
+        """円軌道と8の字軌道の幾何学計算"""
         if self.type == "figure8":
-            # 8の字軌道（リサージュ図形）。対角線を何度も塞ぐ意地悪な軌道。
             self.x = self.cx + self.size * math.sin(self.t)
             self.y = self.cy + self.size * math.sin(2.0 * self.t)
         elif self.type == "circle":
-            # 単純な円軌道
             self.x = self.cx + self.size * math.cos(self.t)
             self.y = self.cy + self.size * math.sin(self.t)
-        else:
-            # 指定がない場合は中心で停止
-            self.x = self.cx
-            self.y = self.cy
 
 class MyJammerEnv(gym.Env):
     def __init__(self):

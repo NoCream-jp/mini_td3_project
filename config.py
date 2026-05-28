@@ -8,15 +8,13 @@ MAX_STEPS_PER_EPISODE = 300     # 1エピソードの最大ステップ数
 AGENT_START_POS = [2.0, 2.0]    # テスト時のエージェントのスタート位置
 GOAL_POS = [-2.0, -2.0]         # エージェントが目指す終点
 
-# Jammerを複数定義するためのリスト
-# type: "figure8" (8の字) または "circle" (円)
+# Jammerの設定
+# type: "linear_cross" を新設。右下(2,-2)から左上(-2,2)へ直進し、往復パトロールする
 JAMMER_CONFIGS = [
     {
-        "type": "figure8", 
-        "center": [0.0, 0.0], # 軌道の中心
-        "size": 1.5,          # 軌道の大きさ（振幅）
-        "speed": 0.033,        # 動く速さ
-        "angle": 0            # 初期位相（スタート位置のズレ）
+        "type": "linear_cross", 
+        "pos": [2.0, -2.0],     # 初期位置（右下）
+        "speed": 0.1,           # エージェントの最高速度(0.1)と完全に同期
     }
 ]
 
