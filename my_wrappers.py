@@ -186,3 +186,89 @@ class SafetyShieldWrapper(gym.Wrapper):
             candidates.append(np.array([rot_x, rot_y], dtype=np.float32))
             
         return candidates
+
+
+# =====================================================================
+# 3. 速度ベクトルを渡して学習を進めてもらうラッパー
+# =====================================================================
+import gymnasium as gym
+import numpy as np
+from gymnasium import spaces
+
+class VelocityObservationWrapper(gym.Wrapper):
+    """
+    環境から出力される観測(obs)に、「各ジャマーとの相対速度ベクトル」を追加して
+    AIのニューラルネットワークに渡すための視覚拡張ラッパー。
+    """
+    def __init__(self, env):
+        super().__init__(env)
+        
+        raw_env = self.env.unwrapped
+        self.num_jammers = len(config.JAMMER_CONFIGS)
+        
+        old_dim = 2 + (self.num_jammers * 2)
+        new_dim = old_dim + (self.num_jammers * 2)
+        
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(new_dim,), dtype=np.float32
+        )
+        
+        # ⭕ 修正：None を使わず、最初から安全なゼロ配列（ダミー）を入れておく
+        # これで型チェッカーは「あ、確実に配列が入っているな」と安心します
+        self.prev_ego_pos = np.zeros(2, dtype=np.float32)
+        self.prev_jam_positions = [np.zeros(2, dtype=np.float32) for _ in range(self.num_jammers)]
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        
+        # --- 初期位置の記録 ---
+        self.prev_ego_pos = obs[0:2]  # 0,1番目はエージェント
+        self.prev_jam_positions = []
+        
+        for i in range(self.num_jammers):
+            # ジャマーのx, yは2番目以降に2つずつ格納されている
+            jx_jy = obs[2 + i*2 : 4 + i*2]
+            self.prev_jam_positions.append(jx_jy)
+            
+        # リセット直後はまだ動いていないため、相対速度はすべて 0.0
+        rel_vs = np.zeros(self.num_jammers * 2, dtype=np.float32)
+        
+        # 元の観測配列の後ろに、相対速度の配列を連結（くっつける）
+        new_obs = np.concatenate([obs, rel_vs], dtype=np.float32)
+        
+        return new_obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # --- 1. エージェントの速度計算 ---
+        current_ego_pos = obs[0:2]
+        ego_v = current_ego_pos - self.prev_ego_pos
+        
+        rel_vs = []
+        current_jam_positions = []
+        
+        # --- 2. 各ジャマーの相対速度計算 ---
+        for i in range(self.num_jammers):
+            # 現在のジャマー位置を取得
+            jam_pos = obs[2 + i*2 : 4 + i*2]
+            
+            # ジャマーの絶対速度
+            jam_v = jam_pos - self.prev_jam_positions[i]
+            
+            # 相対速度 = 相手の速度 - 自分の速度
+            rel_v = jam_v - ego_v
+            rel_vs.extend(rel_v)
+            
+            # 次のステップのために現在の位置を保存リストへ
+            current_jam_positions.append(jam_pos)
+            
+        # --- 3. 過去の記録を更新 ---
+        self.prev_ego_pos = current_ego_pos
+        self.prev_jam_positions = current_jam_positions
+        
+        # --- 4. 新しい観測配列の作成 ---
+        rel_vs_array = np.array(rel_vs, dtype=np.float32)
+        new_obs = np.concatenate([obs, rel_vs_array], dtype=np.float32)
+        
+        return new_obs, reward, terminated, truncated, info

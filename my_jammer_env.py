@@ -5,8 +5,6 @@ from gymnasium import spaces
 
 import config
 
-# my_jammer_env.py 内の JammerState クラスを以下に差し替え
-
 class JammerState:
     def __init__(self, config_dict):
         self.type = config_dict.get("type", "circle")
