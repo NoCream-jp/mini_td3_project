@@ -164,22 +164,22 @@ def draw_from_csv(now_time, prediction_snapshots=None):
     plt.plot(x_history, y_history, color='blue', marker='.', linestyle='-', linewidth=1.5, label='Agent Trajectory', zorder=4)
     plt.scatter(x_history[0], y_history[0], color='green', marker='o', s=100, label='Start', zorder=5)
     
-    # ★変更：引数で直接受け取ったメモリ上の予測リストを展開して描画
-    if prediction_snapshots is not None:
-        for idx, shot in enumerate(prediction_snapshots):
-            a_pos = shot["agent_pos"]
-            all_jam_preds = shot["preds"]
+    # 引数で直接受け取ったメモリ上の予測リストを展開して描画
+    # if prediction_snapshots is not None:
+    #     for idx, shot in enumerate(prediction_snapshots):
+    #         a_pos = shot["agent_pos"]
+    #         all_jam_preds = shot["preds"]
             
-            # 予測が行われた位置に小さな黒丸を打つ
-            plt.scatter(a_pos[0], a_pos[1], color='black', marker='o', s=25, zorder=5)
+    #         # 予測が行われた位置に小さな黒丸を打つ
+    #         plt.scatter(a_pos[0], a_pos[1], color='black', marker='o', s=25, zorder=5)
             
-            # 予測軌道を描画
-            for jam_idx, pred_traj in enumerate(all_jam_preds):
-                px = [pt[0] for pt in pred_traj]
-                py = [pt[1] for pt in pred_traj]
+    #         # 予測軌道を描画
+    #         for jam_idx, pred_traj in enumerate(all_jam_preds):
+    #             px = [pt[0] for pt in pred_traj]
+    #             py = [pt[1] for pt in pred_traj]
                 
-                label = "Jammer Prediction" if idx == 0 and jam_idx == 0 else ""
-                plt.plot(px, py, color='darkorange', linestyle=':', alpha=0.7, linewidth=1.8, label=label, zorder=2)
+    #             label = "Jammer Prediction" if idx == 0 and jam_idx == 0 else ""
+    #             plt.plot(px, py, color='darkorange', linestyle=':', alpha=0.7, linewidth=1.8, label=label, zorder=2)
 
     plt.title(f"Dynamic Jammer Evasion ({now_time})")
     plt.xlabel("X")
@@ -201,14 +201,14 @@ def main():
 
     # まず生の環境を作成
     raw_env = MyJammerEnv()
-
+    env = raw_env
     # Jammerの速度ベクトルをAIに見せる
-    env = VelocityObservationWrapper(raw_env)
+    # env = VelocityObservationWrapper(env)
     
     # 予測ラッパーを着せる（裏側で予測データを計算する）
     # シールドラッパーを着せる（予測データを使って安全確保する）
     # ※安全な距離障害物半径(0.2) + 余白(0.15) = 0.35
-    env = TrajectoryPredictionWrapper(raw_env, history_length=2, horizon_steps=20)
+    env = TrajectoryPredictionWrapper(env, history_length=2, horizon_steps=20)
     env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
 
     # ラッパーなしならこっちを使う

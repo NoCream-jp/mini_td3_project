@@ -5,93 +5,110 @@ from gymnasium import spaces
 
 import config
 
+import math
+import numpy as np
+
 class JammerState:
     def __init__(self, config_dict):
         self.type = config_dict.get("type", "circle")
         self.speed = config_dict.get("speed", 0.05)
         
-        # 内部時間・位相としてのパラメータ（全軌道共通）
-        self.t = math.radians(config_dict.get("angle", 0.0))
-        
-        # サイン波（sin_wave）および直線（linear_cross）用の幾何学設定
-        if self.type in ["sin_wave", "linear_cross"]:
-            # 指定された始点と終点（デフォルトは右下から左上への対角線）
+        # ==========================================
+        # ① 直線運動 (linear_cross) の初期化
+        # ==========================================
+        if self.type == "linear_cross":
             self.start_pos = np.array(config_dict.get("start_pos", [2.0, -2.0]), dtype=np.float32)
             self.end_pos = np.array(config_dict.get("end_pos", [-2.0, 2.0]), dtype=np.float32)
             
-            # 波のカスタムパラメータ
+            direction = self.end_pos - self.start_pos
+            self.total_dist = np.linalg.norm(direction) + 1e-6
+            
+            self.progress = 0.0
+            self.forward = True
+
+        # ==========================================
+        # ② サイン波 (sin_wave) の初期化
+        # ==========================================
+        elif self.type == "sin_wave":
+            self.start_pos = np.array(config_dict.get("start_pos", [2.0, -2.0]), dtype=np.float32)
+            self.end_pos = np.array(config_dict.get("end_pos", [-2.0, 2.0]), dtype=np.float32)
             self.amplitude = config_dict.get("amplitude", 0.5)
             self.frequency = config_dict.get("frequency", 2.0)
             
-            # 往復運動を管理するための内部進行度 (0.0 から 1.0 の間を往復)
-            self.progress = 0.0
-            self.forward = True # True: 往路(始->終), False: 復路(終->始)
-            
-            # 直線移動ベクトルの算出（向きを揃えるため）
             direction = self.end_pos - self.start_pos
-            self.total_dist = np.linalg.norm(direction)
-            self.dir_unit = direction / (self.total_dist + 1e-6)
+            self.total_dist = np.linalg.norm(direction) + 1e-6
             
-            # 垂直ベクトルの算出（波を進行方向に対して横に揺らすため）
-            self.perpendicular_unit = np.array([-self.dir_unit[1], self.dir_unit[0]], dtype=np.float32)
-        else:
-            # 既存の円・8の字用の幾何学設定
+            # 波を横に揺らすための「垂直ベクトル」を計算しておく
+            dir_unit = direction / self.total_dist
+            self.perpendicular_unit = np.array([-dir_unit[1], dir_unit[0]], dtype=np.float32)
+            
+            self.progress = 0.0
+            self.forward = True
+
+        # ==========================================
+        # ③ 円・8の字 (circle / figure8) の初期化
+        # ==========================================
+        elif self.type in ["circle", "figure8"]:
             self.cx = config_dict.get("center", [0.0, 0.0])[0]
             self.cy = config_dict.get("center", [0.0, 0.0])[1]
             self.size = config_dict.get("size", 1.0)
-            
+            # 円運動用の角度（ラジアン）
+            self.t = math.radians(config_dict.get("angle", 0.0))
+
         self.x = 0.0
         self.y = 0.0
         self.update_position()
         
     def update(self):
-        """毎ステップ時間を進めて座標を自動更新する（統一窓口）"""
-        if self.type in ["sin_wave", "linear_cross"]:
-            # 1ステップあたりの進捗度（割合）を計算
-            step_progress = self.speed / (self.total_dist + 1e-6)
+        """毎ステップ、各軌道に合わせた「時間・進捗」を進める"""
+        # 直線とサイン波は「進捗率 (0.0 〜 1.0)」を往復させる
+        if self.type in ["linear_cross", "sin_wave"]:
+            step_progress = self.speed / self.total_dist
             
             if self.forward:
                 self.progress += step_progress
                 if self.progress >= 1.0:
                     self.progress = 1.0
-                    self.forward = False # 終点に達したら反転
+                    self.forward = False
             else:
                 self.progress -= step_progress
                 if self.progress <= 0.0:
                     self.progress = 0.0
-                    self.forward = True # 始点に達したら反転
-        else:
-            # 円・8の字は角度時間を進める
+                    self.forward = True
+                    
+        # 円・8の字はシンプルに「角度(t)」を回し続ける
+        elif self.type in ["circle", "figure8"]:
             self.t += self.speed
             
         self.update_position()
 
     def update_position(self):
-        """全ての幾何学計算をここに集約"""
-        if self.type == "sin_wave":
-            # 1. 基準線（直線ルート）上の現在位置を算出
+        """進んだ「時間・進捗」を元に、実際の X, Y 座標を計算する"""
+        if self.type == "linear_cross":
+            # 始点と終点の間を、progressの割合で直線補間
+            pos = self.start_pos + (self.end_pos - self.start_pos) * self.progress
+            self.x, self.y = pos[0], pos[1]
+            
+        elif self.type == "sin_wave":
+            # 1. まず直線の基準位置を出す
             base_pos = self.start_pos + (self.end_pos - self.start_pos) * self.progress
-            # 2. 進捗に応じたサイン波の横揺れ（変位）を計算
-            # 往復で滑らかに繋がるよう、progressに π * frequency を掛ける
+            # 2. サイン波のうねり（垂直方向のズレ）を計算
             wave_offset = self.amplitude * math.sin(self.progress * math.pi * self.frequency)
-            # 3. 基準線に垂直な波を合成
-            final_pos = base_pos + self.perpendicular_unit * wave_offset
-            self.x, self.y = final_pos[0], final_pos[1]
-            
-        elif self.type == "linear_cross":
-            # 揺れのない純粋な往復直線運動
-            final_pos = self.start_pos + (self.end_pos - self.start_pos) * self.progress
-            self.x, self.y = final_pos[0], final_pos[1]
-            
-        elif self.type == "figure8":
-            self.x = self.cx + self.size * math.sin(self.t)
-            self.y = self.cy + self.size * math.sin(2.0 * self.t)
+            # 3. 基準位置にズレを足し合わせる
+            pos = base_pos + self.perpendicular_unit * wave_offset
+            self.x, self.y = pos[0], pos[1]
             
         elif self.type == "circle":
+            # 三角関数で円を描く
             self.x = self.cx + self.size * math.cos(self.t)
             self.y = self.cy + self.size * math.sin(self.t)
             
-        # 共通の壁クリップ処理（予測や描画の枠外はみ出し防止）
+        elif self.type == "figure8":
+            # Y軸の周波数を2倍にすることで8の字（リサージュ図形）を描く
+            self.x = self.cx + self.size * math.sin(self.t)
+            self.y = self.cy + self.size * math.sin(2.0 * self.t)
+            
+        # 画面外に出ないようにクリップ（全軌道共通）
         self.x = np.clip(self.x, -2.0, 2.0)
         self.y = np.clip(self.y, -2.0, 2.0)
 
