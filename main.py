@@ -11,7 +11,7 @@ import matplotlib.patches as patches
 # 自作ファイルインポート
 import config
 from my_jammer_env import MyJammerEnv
-from my_wrappers import TrajectoryPredictionWrapper, SafetyShieldWrapper
+from my_wrappers import TrajectoryPredictionWrapper, SafetyShieldWrapper, VelocityObservationWrapper
 
 # ノイズインポート
 from stable_baselines3.common.noise import NormalActionNoise
@@ -201,6 +201,9 @@ def main():
 
     # まず生の環境を作成
     raw_env = MyJammerEnv()
+
+    # Jammerの速度ベクトルをAIに見せる
+    env = VelocityObservationWrapper(raw_env)
     
     # 予測ラッパーを着せる（裏側で予測データを計算する）
     # シールドラッパーを着せる（予測データを使って安全確保する）

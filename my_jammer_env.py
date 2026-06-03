@@ -100,7 +100,6 @@ class MyJammerEnv(gym.Env):
         super().__init__()
         self.num_jammers = len(config.JAMMER_CONFIGS)
         
-        # 
         obs_dim = 2 + (self.num_jammers * 2)
         self.observation_space = spaces.Box(low=-2.0, high=2.0, shape=(obs_dim,), dtype=np.float32)
         self.action_space = spaces.Box(low=-0.1, high=0.1, shape=(2,), dtype=np.float32)

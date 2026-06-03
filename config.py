@@ -11,9 +11,17 @@ GOAL_POS = [-2.0, -2.0]         # エージェントが目指す終点
 # Jammerの設定
 # type: "sin_wave" を新設。
 # 指定したスタート[2.0, 0]から左[-2.0, 0]へ向かってパトロールしつつ、Y軸方向に波形に揺れる
+f"""
+SAMPLE_JAMMER_CONFIGS = [
+    {
+        "type": "linear_cross",
+        "start_pos":
+    }
+]
+"""
 JAMMER_CONFIGS = [
     {
-        "type": "sin_wave", 
+        "type": "linear_cross", 
         "start_pos": [2.0, 0.0],   # 波の基準線の開始点
         "end_pos": [-2.0, 0.0],    # 波の基準線の終着点
         "amplitude": 0.8,          # 波の振幅（Y軸方向にどれくらい大きく揺れるか）
