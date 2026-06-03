@@ -48,7 +48,7 @@ JAMMER_CONFIGS = [
         "type": "circle",
         "center": [0.0, 0.0],
         "size": 0.7,
-        "speed": 0.20,
+        "speed": 1.0,
         "angle": 0.0
     },
 ]

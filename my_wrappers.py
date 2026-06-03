@@ -213,8 +213,7 @@ class VelocityObservationWrapper(gym.Wrapper):
             low=-np.inf, high=np.inf, shape=(new_dim,), dtype=np.float32
         )
         
-        # ⭕ 修正：None を使わず、最初から安全なゼロ配列（ダミー）を入れておく
-        # これで型チェッカーは「あ、確実に配列が入っているな」と安心します
+        # None を使わず、最初から安全なゼロ配列（ダミー）を入れておく
         self.prev_ego_pos = np.zeros(2, dtype=np.float32)
         self.prev_jam_positions = [np.zeros(2, dtype=np.float32) for _ in range(self.num_jammers)]
 
