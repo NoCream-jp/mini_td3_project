@@ -236,7 +236,7 @@ def main():
     env = KalmanPredictionWrapper(env, horizon_steps=20)
     env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
 
-    # 【手法6🆕】カルマン予測 ＋ 人工ポテンシャル法シールド（APF）
+    # 【手法6】カルマン予測 ＋ 人工ポテンシャル法シールド（APF）
     env = VelocityObservationWrapper(raw_env)
     env = KalmanPredictionWrapper(env, horizon_steps=20)
     # 古いシールドの代わりに APF シールドを被せる

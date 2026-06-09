@@ -45,12 +45,19 @@ SAMPLE_JAMMER_CONFIGS = [
 """
 JAMMER_CONFIGS = [
     {
-        "type": "circle",
-        "center": [0.0, 0.0],
-        "size": 0.7,
-        "speed": 1.0,
-        "angle": 0.0
+        # 左側の壁役
+        "type": "linear_cross", 
+        "start_pos": [-1.0, -2.0], # 下から
+        "end_pos": [1.0, 2.0],     # 上へ
+        "speed": 0.04,
     },
+    {
+        # 右側の壁役（少し間隔を空けて並走）
+        "type": "linear_cross", 
+        "start_pos": [-0.2, -2.0], # 下から
+        "end_pos": [1.8, 2.0],     # 上へ
+        "speed": 0.04,
+    }
 ]
 
 OBSTACLE_RADIUS = 0.2           # 障害物の判定半径
