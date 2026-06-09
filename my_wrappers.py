@@ -8,7 +8,7 @@ import config
 from my_jammer_env import MyJammerEnv
 
 # =====================================================================
-# 1. 軌道予測ラッパー (The Oracle)
+# 1. 単純な軌道予測ラッパー (The Oracle)
 # =====================================================================
 class TrajectoryPredictionWrapper(gym.Wrapper):
     """
@@ -59,7 +59,7 @@ class TrajectoryPredictionWrapper(gym.Wrapper):
                 dx = (current_pos[0] - oldest_pos[0]) / (len(hist) - 1)
                 dy = (current_pos[1] - oldest_pos[1]) / (len(hist) - 1)
             else:
-                # ⭕ 修正：特定の軌道に依存せず、開始直後（履歴不足時）は「停止」として扱う
+                # 特定の軌道に依存せず、開始直後（履歴不足時）は「停止」として扱う
                 # これにより、どんなジャマーを設定してもエラーやズレが起きなくなります
                 dx, dy = 0.0, 0.0
                 
@@ -85,7 +85,7 @@ class TrajectoryPredictionWrapper(gym.Wrapper):
 
 
 # =====================================================================
-# 2. 安全シールドラッパー (The Shield)
+# 2. 30度ずつ回転を試す、回避ラッパー (The Shield)
 # =====================================================================
 class SafetyShieldWrapper(gym.Wrapper):
     """
@@ -100,7 +100,7 @@ class SafetyShieldWrapper(gym.Wrapper):
 
     def reset(self, seed=None, options=None):
         obs, info = self.env.reset(seed=seed, options=options)
-        # 環境が初期化された時の予d測データを取得
+        # 環境が初期化された時の予測データを取得
         self.latest_preds = info.get('jam_preds', [])
         return obs, info
 
@@ -116,7 +116,7 @@ class SafetyShieldWrapper(gym.Wrapper):
         
         # 4. もしシールドが発動（行動が書き換えられた）場合、AIにペナルティを与える
         if not np.array_equal(action, safe_action):
-            reward = float(reward) - 5.0 # 「助けてもらうような危険な行動をするな」という教育的指導
+            # reward = float(reward) - 5.0 # 「助けてもらうような危険な行動をするな」という教育的指導を消去。比較のため。
             info['shield_activated'] = True
         else:
             info['shield_activated'] = False
@@ -189,7 +189,7 @@ class SafetyShieldWrapper(gym.Wrapper):
 
 
 # =====================================================================
-# 3. 速度ベクトルを渡して学習を進めてもらうラッパー
+# 3. 速度ベクトルを渡す学習ラッパー
 # =====================================================================
 import gymnasium as gym
 import numpy as np
@@ -271,3 +271,231 @@ class VelocityObservationWrapper(gym.Wrapper):
         new_obs = np.concatenate([obs, rel_vs_array], dtype=np.float32)
         
         return new_obs, reward, terminated, truncated, info
+
+
+class KalmanFilter2D:
+    """2次元の等速直線運動（CVモデル）用カルマンフィルタ"""
+    def __init__(self, dt=1.0, std_acc=0.03, std_meas=0.001):
+        self.dt = dt
+        # 状態ベクトル: [x, y, vx, vy]^T
+        self.x = np.zeros(4, dtype=np.float32)
+        
+        # 状態遷移行列 F (未来を予測する物理法則: 等速直線)
+        self.F = np.array([
+            [1, 0, dt, 0],
+            [0, 1, 0, dt],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ], dtype=np.float32)
+        
+        # 観測行列 H (センサーから見えるもの＝位置 x, y のみ)
+        self.H = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ], dtype=np.float32)
+        
+        # 誤差共分散行列 P (現在の推定に対する「自信のなさ」)
+        self.P = np.eye(4, dtype=np.float32) * 1.0
+        
+        # 観測ノイズ共分散 R (センサーのブレ具合)
+        self.R = np.eye(2, dtype=np.float32) * (std_meas**2)
+        
+        # プロセスノイズ共分散 Q (想定外の動き・加速度のブレ具合)
+        # サイン波のような「直線から外れる動き」を許容するための重要なパラメータ
+        self.Q = np.eye(4, dtype=np.float32) * (std_acc**2)
+        
+    def predict(self):
+        """事前推定：現在の速度のまま進んだらどこにいるか"""
+        self.x = np.dot(self.F, self.x)
+        self.P = np.dot(np.dot(self.F, self.P), self.F.T) + self.Q
+        
+    def update(self, z):
+        """事後推定：実際の観測データ(z)を使って予測を修正する"""
+        y = z - np.dot(self.H, self.x) # 予測と実際のズレ（イノベーション）
+        S = np.dot(np.dot(self.H, self.P), self.H.T) + self.R
+        K = np.dot(np.dot(self.P, self.H.T), np.linalg.inv(S)) # カルマンゲイン
+        
+        self.x = self.x + np.dot(K, y)
+        I = np.eye(self.P.shape[0])
+        self.P = np.dot(I - np.dot(K, self.H), self.P)
+
+import gymnasium as gym
+
+# =====================================================================
+# 4. カルマンフィルタを利用する予測ラッパー
+# =====================================================================
+class KalmanPredictionWrapper(gym.Wrapper):
+    """
+    カルマンフィルタを用いてジャマーの未来軌道を予測するラッパー。
+    以前の TrajectoryPredictionWrapper の完全上位互換です。
+    """
+    def __init__(self, env, horizon_steps=20):
+        super().__init__(env)
+        self.horizon_steps = horizon_steps
+        
+        raw_env = self.env.unwrapped
+        raw_env = cast(MyJammerEnv, self.env.unwrapped)
+        self.num_jammers = raw_env.num_jammers
+        self.kfs = []
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        
+        self.kfs = []
+        for i in range(self.num_jammers):
+            # カルマンフィルタを初期化
+            kf = KalmanFilter2D(dt=1.0, std_acc=0.03, std_meas=0.001)
+            
+            jx = obs[2 + i*2]
+            jy = obs[3 + i*2]
+            
+            # 初期位置をセット、初期速度は0のままスタート
+            kf.x[0] = jx
+            kf.x[1] = jy
+            self.kfs.append(kf)
+            
+        info['jam_preds'] = self._predict_trajectories()
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # 各ジャマーのカルマンフィルタを更新
+        for i in range(self.num_jammers):
+            jx = obs[2 + i*2]
+            jy = obs[3 + i*2]
+            z = np.array([jx, jy], dtype=np.float32)
+            
+            # 1. 前回の状態から今の位置を「予測」
+            self.kfs[i].predict()
+            
+            # 2. 実際の今の位置(z)を使って、内部の速度ベクトルを「修正」
+            self.kfs[i].update(z)
+            
+        # 修正された最新の速度ベクトルを使って未来軌道を生成
+        info['jam_preds'] = self._predict_trajectories()
+        return obs, reward, terminated, truncated, info
+
+    def _predict_trajectories(self):
+        all_preds = []
+        for kf in self.kfs:
+            pred_traj = []
+            
+            # 未来をシミュレーションするために、現在の状態(x, y, vx, vy)をコピー
+            sim_x = np.copy(kf.x)
+            
+            for _ in range(self.horizon_steps):
+                # 状態遷移行列 F を掛けて、1歩未来へ進める
+                sim_x = np.dot(kf.F, sim_x)
+                
+                # 世界の果て（壁）での反射ロジック
+                if sim_x[0] < -2.0 or sim_x[0] > 2.0:
+                    sim_x[2] = -sim_x[2] # X方向の速度ベクトルを反転
+                    sim_x[0] = np.clip(sim_x[0], -2.0, 2.0)
+                if sim_x[1] < -2.0 or sim_x[1] > 2.0:
+                    sim_x[3] = -sim_x[3] # Y方向の速度ベクトルを反転
+                    sim_x[1] = np.clip(sim_x[1], -2.0, 2.0)
+                    
+                pred_traj.append((sim_x[0], sim_x[1]))
+                
+            all_preds.append(pred_traj)
+            
+        return all_preds
+
+# =====================================================================
+# 5. 人工ポテンシャル法で滑らかに離れる回避ラッパー
+# =====================================================================
+class PotentialFieldShieldWrapper(gym.Wrapper):
+    """
+    人工ポテンシャル法（APF）を用いた安全シールド。
+    AIの行動を「引力」、予測されるジャマーからの危険度を「斥力」とし、
+    それらの合力ベクトルを計算して滑らかに回避する。
+    """
+    def __init__(self, env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05):
+        super().__init__(env)
+        self.lookahead_steps = lookahead_steps
+        self.safety_margin = safety_margin
+        
+        # 斥力の強さを決めるパラメータ（大きいほど強く弾かれる）
+        self.k_rep = k_rep 
+        
+        self.latest_preds = []
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        self.latest_preds = info.get('jam_preds', [])
+        return obs, info
+
+    def step(self, action):
+        # 1. ポテンシャル法による合力（安全な行動ベクトル）の計算
+        safe_action = self._calculate_apf_action(action)
+        
+        # 2. 環境を進める
+        obs, reward, terminated, truncated, info = self.env.step(safe_action)
+        self.latest_preds = info.get('jam_preds', [])
+        
+        # 3. シールド介入判定
+        if not np.allclose(action, safe_action, atol=1e-5):
+            info['shield_activated'] = True
+        else:
+            info['shield_activated'] = False
+            
+        return obs, reward, terminated, truncated, info
+
+    def _calculate_apf_action(self, action):
+        if not self.latest_preds:
+            return action
+            
+        raw_env = cast(MyJammerEnv, self.env.unwrapped)
+        current_pos = raw_env.location
+        
+        # 引力ベクトル：AIが本来行きたい方向（TD3の出力）
+        F_att = action 
+        # 斥力ベクトルの初期化
+        F_rep = np.zeros(2, dtype=np.float32)
+        
+        is_danger = False
+        action_norm = np.linalg.norm(action)
+        
+        if action_norm < 1e-6:
+            return action # 止まっているなら何もしない
+            
+        steps = min(self.lookahead_steps, len(self.latest_preds[0]))
+        
+        # 影響圏（この距離以内に入ったら斥力が発生し始める）
+        influence_radius = self.safety_margin + 0.2
+        
+        for k in range(steps):
+            # AIがそのまま進んだ場合の未来位置
+            agent_future = current_pos + action * (k + 1)
+            
+            for jam_pred in self.latest_preds:
+                jam_future = np.array(jam_pred[k])
+                dist = np.linalg.norm(agent_future - jam_future)
+                
+                # もし影響圏内に入る未来があれば、斥力を計算して足し合わせる
+                if dist < influence_radius:
+                    is_danger = True
+                    # ジャマーからエージェントへ向かう方向ベクトル
+                    diff = agent_future - jam_future
+                    dir_vector = diff / (dist + 1e-6)
+                    
+                    # 距離が近いほど指数関数的に強くなる斥力の大きさ
+                    magnitude = self.k_rep * ((1.0 / (dist + 1e-6)) - (1.0 / influence_radius))
+                    F_rep += dir_vector * magnitude
+
+        # 危険が全く予測されなかった場合は、本来のAIの行動をそのまま通す
+        if not is_danger:
+            return action
+
+        # 【ポテンシャル場の合力計算】
+        F_total = F_att + F_rep
+        total_norm = np.linalg.norm(F_total)
+
+        # AIが出力した本来の行動の「速さ（ベクトルの長さ）」は維持しつつ、
+        # 合力によって「向き」だけを滑らかに曲げる処理
+        if total_norm > 1e-5:
+            safe_action = (F_total / total_norm) * action_norm
+            return safe_action
+        else:
+            return np.zeros(2, dtype=np.float32) # 合力がゼロ（完全に相殺）なら急停止

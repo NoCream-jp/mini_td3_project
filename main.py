@@ -16,6 +16,15 @@ from my_wrappers import TrajectoryPredictionWrapper, SafetyShieldWrapper, Veloci
 # ノイズインポート
 from stable_baselines3.common.noise import NormalActionNoise
 
+# ラッパーインポート
+from my_wrappers import (
+    TrajectoryPredictionWrapper, 
+    SafetyShieldWrapper, 
+    VelocityObservationWrapper,
+    KalmanPredictionWrapper,
+    PotentialFieldShieldWrapper  # 🆕 これを追加！
+)
+
 # コールバック関数
 ## データロガー
 class EpisodeLoggerCallback(BaseCallback):
@@ -200,17 +209,38 @@ def main():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 
     #---------------wrapper装備----------------------
-    # まず生の環境を作成
-    env = MyJammerEnv()
+    # 0. まず生の環境を作成
+    raw_env = MyJammerEnv()
 
-    # 手法3: Jammerの速度ベクトルをAIに見せる
-    # env = VelocityObservationWrapper(env)
-    
-    # 手法2-1:予測ラッパーを着せる（裏側で予測データを計算する）
-    # 手法2-2:シールドラッパーを着せる（予測データを使って安全確保する）
-    # ※安全な距離障害物半径(0.2) + 余白(0.15) = 0.35
+    # ==========================================
+    # 実験スイッチ：実行したい手法を1つだけ選び、コメントを外してください
+    # ==========================================
+
+    # 【手法1】純粋な強化学習（座標のみ）
+    # env = raw_env
+
+    # 【手法2】強化学習 ＋ 予測シールド（CVモデル: 等速直線）
+    # env = TrajectoryPredictionWrapper(raw_env, history_length=2, horizon_steps=20)
+    # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
+
+    # 【手法3】強化学習 ＋ 速度ベクトル入力
+    # env = VelocityObservationWrapper(raw_env)
+
+    # 【手法4】ハイブリッド（速度入力 ＋ CV予測シールド）
+    # env = VelocityObservationWrapper(raw_env)
     # env = TrajectoryPredictionWrapper(env, history_length=2, horizon_steps=20)
     # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
+
+    # 【手法5】最新ハイブリッド（速度入力 ＋ カルマンフィルタ予測シールド）
+    env = VelocityObservationWrapper(raw_env)
+    env = KalmanPredictionWrapper(env, horizon_steps=20)
+    env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
+
+    # 【手法6🆕】カルマン予測 ＋ 人工ポテンシャル法シールド（APF）
+    env = VelocityObservationWrapper(raw_env)
+    env = KalmanPredictionWrapper(env, horizon_steps=20)
+    # 古いシールドの代わりに APF シールドを被せる
+    env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
     #------------------------------------------------
 
     # 環境envを利用して学習を実行する
