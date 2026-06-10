@@ -499,3 +499,91 @@ class PotentialFieldShieldWrapper(gym.Wrapper):
             return safe_action
         else:
             return np.zeros(2, dtype=np.float32) # 合力がゼロ（完全に相殺）なら急停止
+
+
+# =====================================================================
+# 5. モンテカルロ法を利用した予測ラッパー
+# =====================================================================
+class MonteCarloPredictionWrapper(gym.Wrapper):
+    """
+    モンテカルロ法でジャマーの未来軌道を予測するラッパー。
+    各ジャマーについて複数サンプルの軌道を生成し、その平均を予測とする。
+    """
+
+    def __init__(self, env, horizon_steps=20, num_samples=30, noise_std=0.05):
+        super().__init__(env)
+        self.horizon_steps = horizon_steps
+        self.num_samples = num_samples
+        self.noise_std = noise_std
+
+        raw_env = cast(MyJammerEnv, self.env.unwrapped)
+        self.num_jammers = raw_env.num_jammers
+
+        # 前ステップ位置（速度推定用）
+        self.prev_positions = [np.zeros(2, dtype=np.float32) for _ in range(self.num_jammers)]
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+
+        self.prev_positions = []
+        for i in range(self.num_jammers):
+            pos = obs[2 + i*2 : 4 + i*2]
+            self.prev_positions.append(pos)
+
+        info['jam_preds'] = self._predict(obs)
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        info['jam_preds'] = self._predict(obs)
+
+        # 更新
+        for i in range(self.num_jammers):
+            self.prev_positions[i] = obs[2 + i*2 : 4 + i*2]
+
+        return obs, reward, terminated, truncated, info
+
+    def _predict(self, obs):
+        all_preds = []
+
+        for i in range(self.num_jammers):
+            current_pos = obs[2 + i*2 : 4 + i*2]
+            prev_pos = self.prev_positions[i]
+
+            # 速度推定（単純差分）
+            velocity = current_pos - prev_pos
+
+            samples = []
+
+            for _ in range(self.num_samples):
+                traj = []
+                sim_pos = np.copy(current_pos)
+                sim_vel = np.copy(velocity)
+
+                for _ in range(self.horizon_steps):
+                    # ランダムノイズ追加（ここがモンテカルロ）
+                    noise = np.random.normal(0, self.noise_std, size=2)
+                    sim_vel = sim_vel + noise
+
+                    sim_pos = sim_pos + sim_vel
+
+                    # 壁反射
+                    for d in range(2):
+                        if sim_pos[d] < -2.0 or sim_pos[d] > 2.0:
+                            sim_vel[d] = -sim_vel[d]
+                            sim_pos[d] = np.clip(sim_pos[d], -2.0, 2.0)
+
+                    traj.append(sim_pos.copy())
+
+                samples.append(traj)
+
+            # サンプル平均を取る
+            mean_traj = []
+            for t in range(self.horizon_steps):
+                mean_pos = np.mean([samples[s][t] for s in range(self.num_samples)], axis=0)
+                mean_traj.append((mean_pos[0], mean_pos[1]))
+
+            all_preds.append(mean_traj)
+
+        return all_preds

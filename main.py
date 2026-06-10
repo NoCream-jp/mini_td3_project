@@ -22,7 +22,8 @@ from my_wrappers import (
     SafetyShieldWrapper, 
     VelocityObservationWrapper,
     KalmanPredictionWrapper,
-    PotentialFieldShieldWrapper  # 🆕 これを追加！
+    PotentialFieldShieldWrapper,
+    MonteCarloPredictionWrapper
 )
 
 # コールバック関数
@@ -68,9 +69,14 @@ def draw_score(now_time, rewards):
     plt.plot(range(1, len(rewards) + 1), rewards, color='green', linewidth=1.5, label='Episode Reward')
     plt.title(f"Learning Curve ({now_time})")
     plt.xlabel("Episodes")
-    plt.ylabel("Cumulative Reward")
-    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.ylabel("Cumulative Reward (Symlog Scale)")
+    plt.yscale('symlog', linthresh=100)
+    plt.ylim(-2500, 1500)
+    plt.axhline(0, color='black', linewidth=1.0, linestyle='--', zorder=1)
+
+    plt.grid(True, linestyle=':', alpha=0.7)
     plt.legend()
+    
     img_path = os.path.join(config.OUTPUT_DIR, f"score_{now_time}.png")
     plt.savefig(img_path)
     plt.close()
@@ -232,14 +238,18 @@ def main():
     # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
 
     # 【手法5】最新ハイブリッド（速度入力 ＋ カルマンフィルタ予測シールド）
-    env = VelocityObservationWrapper(raw_env)
-    env = KalmanPredictionWrapper(env, horizon_steps=20)
-    env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
+    # env = VelocityObservationWrapper(raw_env)
+    # env = KalmanPredictionWrapper(env, horizon_steps=20)
+    # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
 
     # 【手法6】カルマン予測 ＋ 人工ポテンシャル法シールド（APF）
+    # env = VelocityObservationWrapper(raw_env)
+    # env = KalmanPredictionWrapper(env, horizon_steps=20)
+    # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
+
+    # 【手法7】モンテカルロ法予測 ＋　人工ポテンシャルシールド（APF）
     env = VelocityObservationWrapper(raw_env)
-    env = KalmanPredictionWrapper(env, horizon_steps=20)
-    # 古いシールドの代わりに APF シールドを被せる
+    env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
     env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
     #------------------------------------------------
 

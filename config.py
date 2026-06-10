@@ -48,14 +48,14 @@ JAMMER_CONFIGS = [
         # 左側の壁役
         "type": "linear_cross", 
         "start_pos": [-1.0, -2.0], # 下から
-        "end_pos": [1.0, 2.0],     # 上へ
+        "end_pos": [-1.0, 1.4],     # 上へ
         "speed": 0.04,
     },
     {
         # 右側の壁役（少し間隔を空けて並走）
         "type": "linear_cross", 
         "start_pos": [-0.2, -2.0], # 下から
-        "end_pos": [1.8, 2.0],     # 上へ
+        "end_pos": [-0.2, 2.0],     # 上へ
         "speed": 0.04,
     }
 ]
