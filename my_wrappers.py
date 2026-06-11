@@ -7,8 +7,93 @@ from typing import cast
 import config
 from my_jammer_env import MyJammerEnv
 
+import gymnasium as gym
+import numpy as np
+from gymnasium import spaces
+
 # =====================================================================
-# 1. 単純な軌道予測ラッパー (The Oracle)
+# 1. 速度ベクトルを渡す学習ラッパー
+# =====================================================================
+class VelocityObservationWrapper(gym.Wrapper):
+    """
+    環境から出力される観測(obs)に、「各ジャマーとの相対速度ベクトル」を追加して
+    AIのニューラルネットワークに渡すための視覚拡張ラッパー。
+    """
+    def __init__(self, env):
+        super().__init__(env)
+        
+        raw_env = self.env.unwrapped
+        self.num_jammers = len(config.JAMMER_CONFIGS)
+        
+        old_dim = 2 + (self.num_jammers * 2)
+        new_dim = old_dim + (self.num_jammers * 2)
+        
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(new_dim,), dtype=np.float32
+        )
+        
+        # None を使わず、最初から安全なゼロ配列（ダミー）を入れておく
+        self.prev_ego_pos = np.zeros(2, dtype=np.float32)
+        self.prev_jam_positions = [np.zeros(2, dtype=np.float32) for _ in range(self.num_jammers)]
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        
+        # --- 初期位置の記録 ---
+        self.prev_ego_pos = obs[0:2]  # 0,1番目はエージェント
+        self.prev_jam_positions = []
+        
+        for i in range(self.num_jammers):
+            # ジャマーのx, yは2番目以降に2つずつ格納されている
+            jx_jy = obs[2 + i*2 : 4 + i*2]
+            self.prev_jam_positions.append(jx_jy)
+            
+        # リセット直後はまだ動いていないため、相対速度はすべて 0.0
+        rel_vs = np.zeros(self.num_jammers * 2, dtype=np.float32)
+        
+        # 元の観測配列の後ろに、相対速度の配列を連結（くっつける）
+        new_obs = np.concatenate([obs, rel_vs], dtype=np.float32)
+        
+        return new_obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # --- 1. エージェントの速度計算 ---
+        current_ego_pos = obs[0:2]
+        ego_v = current_ego_pos - self.prev_ego_pos
+        
+        rel_vs = []
+        current_jam_positions = []
+        
+        # --- 2. 各ジャマーの相対速度計算 ---
+        for i in range(self.num_jammers):
+            # 現在のジャマー位置を取得
+            jam_pos = obs[2 + i*2 : 4 + i*2]
+            
+            # ジャマーの絶対速度
+            jam_v = jam_pos - self.prev_jam_positions[i]
+            
+            # 相対速度 = 相手の速度 - 自分の速度
+            rel_v = jam_v - ego_v
+            rel_vs.extend(rel_v)
+            
+            # 次のステップのために現在の位置を保存リストへ
+            current_jam_positions.append(jam_pos)
+            
+        # --- 3. 過去の記録を更新 ---
+        self.prev_ego_pos = current_ego_pos
+        self.prev_jam_positions = current_jam_positions
+        
+        # --- 4. 新しい観測配列の作成 ---
+        rel_vs_array = np.array(rel_vs, dtype=np.float32)
+        new_obs = np.concatenate([obs, rel_vs_array], dtype=np.float32)
+        
+        return new_obs, reward, terminated, truncated, info
+
+
+# =====================================================================
+# 2. 単純な軌道予測ラッパー (The Oracle)
 # =====================================================================
 class TrajectoryPredictionWrapper(gym.Wrapper):
     """
@@ -85,7 +170,223 @@ class TrajectoryPredictionWrapper(gym.Wrapper):
 
 
 # =====================================================================
-# 2. 30度ずつ回転を試す、回避ラッパー (The Shield)
+# 3. カルマンフィルタ定義、それを利用する予測ラッパー
+# =====================================================================
+class KalmanFilter2D:
+    """2次元の等速直線運動（CVモデル）用カルマンフィルタ"""
+    def __init__(self, dt=1.0, std_acc=0.03, std_meas=0.001):
+        self.dt = dt
+        # 状態ベクトル: [x, y, vx, vy]^T
+        self.x = np.zeros(4, dtype=np.float32)
+        
+        # 状態遷移行列 F (未来を予測する物理法則: 等速直線)
+        self.F = np.array([
+            [1, 0, dt, 0],
+            [0, 1, 0, dt],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ], dtype=np.float32)
+        
+        # 観測行列 H (センサーから見えるもの＝位置 x, y のみ)
+        self.H = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ], dtype=np.float32)
+        
+        # 誤差共分散行列 P (現在の推定に対する「自信のなさ」)
+        self.P = np.eye(4, dtype=np.float32) * 1.0
+        
+        # 観測ノイズ共分散 R (センサーのブレ具合)
+        self.R = np.eye(2, dtype=np.float32) * (std_meas**2)
+        
+        # プロセスノイズ共分散 Q (想定外の動き・加速度のブレ具合)
+        # サイン波のような「直線から外れる動き」を許容するための重要なパラメータ
+        self.Q = np.eye(4, dtype=np.float32) * (std_acc**2)
+        
+    def predict(self):
+        """事前推定：現在の速度のまま進んだらどこにいるか"""
+        self.x = np.dot(self.F, self.x)
+        self.P = np.dot(np.dot(self.F, self.P), self.F.T) + self.Q
+        
+    def update(self, z):
+        """事後推定：実際の観測データ(z)を使って予測を修正する"""
+        y = z - np.dot(self.H, self.x) # 予測と実際のズレ（イノベーション）
+        S = np.dot(np.dot(self.H, self.P), self.H.T) + self.R
+        K = np.dot(np.dot(self.P, self.H.T), np.linalg.inv(S)) # カルマンゲイン
+        
+        self.x = self.x + np.dot(K, y)
+        I = np.eye(self.P.shape[0])
+        self.P = np.dot(I - np.dot(K, self.H), self.P)
+
+import gymnasium as gym
+
+class KalmanPredictionWrapper(gym.Wrapper):
+    """
+    カルマンフィルタを用いてジャマーの未来軌道を予測するラッパー。
+    以前の TrajectoryPredictionWrapper の完全上位互換です。
+    """
+    def __init__(self, env, horizon_steps=20):
+        super().__init__(env)
+        self.horizon_steps = horizon_steps
+        
+        raw_env = self.env.unwrapped
+        raw_env = cast(MyJammerEnv, self.env.unwrapped)
+        self.num_jammers = raw_env.num_jammers
+        self.kfs = []
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        
+        self.kfs = []
+        for i in range(self.num_jammers):
+            # カルマンフィルタを初期化
+            kf = KalmanFilter2D(dt=1.0, std_acc=0.03, std_meas=0.001)
+            
+            jx = obs[2 + i*2]
+            jy = obs[3 + i*2]
+            
+            # 初期位置をセット、初期速度は0のままスタート
+            kf.x[0] = jx
+            kf.x[1] = jy
+            self.kfs.append(kf)
+            
+        info['jam_preds'] = self._predict_trajectories()
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # 各ジャマーのカルマンフィルタを更新
+        for i in range(self.num_jammers):
+            jx = obs[2 + i*2]
+            jy = obs[3 + i*2]
+            z = np.array([jx, jy], dtype=np.float32)
+            
+            # 1. 前回の状態から今の位置を「予測」
+            self.kfs[i].predict()
+            
+            # 2. 実際の今の位置(z)を使って、内部の速度ベクトルを「修正」
+            self.kfs[i].update(z)
+            
+        # 修正された最新の速度ベクトルを使って未来軌道を生成
+        info['jam_preds'] = self._predict_trajectories()
+        return obs, reward, terminated, truncated, info
+
+    def _predict_trajectories(self):
+        all_preds = []
+        for kf in self.kfs:
+            pred_traj = []
+            
+            # 未来をシミュレーションするために、現在の状態(x, y, vx, vy)をコピー
+            sim_x = np.copy(kf.x)
+            
+            for _ in range(self.horizon_steps):
+                # 状態遷移行列 F を掛けて、1歩未来へ進める
+                sim_x = np.dot(kf.F, sim_x)
+                
+                # 世界の果て（壁）での反射ロジック
+                if sim_x[0] < -2.0 or sim_x[0] > 2.0:
+                    sim_x[2] = -sim_x[2] # X方向の速度ベクトルを反転
+                    sim_x[0] = np.clip(sim_x[0], -2.0, 2.0)
+                if sim_x[1] < -2.0 or sim_x[1] > 2.0:
+                    sim_x[3] = -sim_x[3] # Y方向の速度ベクトルを反転
+                    sim_x[1] = np.clip(sim_x[1], -2.0, 2.0)
+                    
+                pred_traj.append((sim_x[0], sim_x[1]))
+                
+            all_preds.append(pred_traj)
+            
+        return all_preds
+
+# =====================================================================
+# 4. モンテカルロ法を利用した予測ラッパー 
+# =====================================================================
+class MonteCarloPredictionWrapper(gym.Wrapper):
+    """
+    モンテカルロ法でジャマーの未来軌道を予測するラッパー。
+    各ジャマーについて複数サンプルの軌道を生成し、その平均を予測とする。
+    """
+
+    def __init__(self, env, horizon_steps=20, num_samples=30, noise_std=0.05):
+        super().__init__(env)
+        self.horizon_steps = horizon_steps
+        self.num_samples = num_samples
+        self.noise_std = noise_std
+
+        raw_env = cast(MyJammerEnv, self.env.unwrapped)
+        self.num_jammers = raw_env.num_jammers
+
+        # 前ステップ位置（速度推定用）
+        self.prev_positions = [np.zeros(2, dtype=np.float32) for _ in range(self.num_jammers)]
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+
+        self.prev_positions = []
+        for i in range(self.num_jammers):
+            pos = obs[2 + i*2 : 4 + i*2]
+            self.prev_positions.append(pos)
+
+        info['jam_preds'] = self._predict(obs)
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        info['jam_preds'] = self._predict(obs)
+
+        # 更新
+        for i in range(self.num_jammers):
+            self.prev_positions[i] = obs[2 + i*2 : 4 + i*2]
+
+        return obs, reward, terminated, truncated, info
+
+    def _predict(self, obs):
+        all_preds = []
+
+        for i in range(self.num_jammers):
+            current_pos = obs[2 + i*2 : 4 + i*2]
+            prev_pos = self.prev_positions[i]
+
+            # 速度推定（単純差分）
+            velocity = current_pos - prev_pos
+
+            samples = []
+
+            for _ in range(self.num_samples):
+                traj = []
+                sim_pos = np.copy(current_pos)
+                sim_vel = np.copy(velocity)
+
+                for _ in range(self.horizon_steps):
+                    # ランダムノイズ追加（ここがモンテカルロ）
+                    noise = np.random.normal(0, self.noise_std, size=2)
+                    sim_vel = sim_vel + noise
+
+                    sim_pos = sim_pos + sim_vel
+
+                    # 壁反射
+                    for d in range(2):
+                        if sim_pos[d] < -2.0 or sim_pos[d] > 2.0:
+                            sim_vel[d] = -sim_vel[d]
+                            sim_pos[d] = np.clip(sim_pos[d], -2.0, 2.0)
+
+                    traj.append(sim_pos.copy())
+
+                samples.append(traj)
+
+            # サンプル平均を取る
+            mean_traj = []
+            for t in range(self.horizon_steps):
+                mean_pos = np.mean([samples[s][t] for s in range(self.num_samples)], axis=0)
+                mean_traj.append((mean_pos[0], mean_pos[1]))
+
+            all_preds.append(mean_traj)
+
+        return all_preds
+
+# =====================================================================
+# 5. 30度ずつ回転を試す、回避ラッパー (The Shield)
 # =====================================================================
 class SafetyShieldWrapper(gym.Wrapper):
     """
@@ -187,229 +488,15 @@ class SafetyShieldWrapper(gym.Wrapper):
             
         return candidates
 
-
 # =====================================================================
-# 3. 速度ベクトルを渡す学習ラッパー
-# =====================================================================
-import gymnasium as gym
-import numpy as np
-from gymnasium import spaces
-
-class VelocityObservationWrapper(gym.Wrapper):
-    """
-    環境から出力される観測(obs)に、「各ジャマーとの相対速度ベクトル」を追加して
-    AIのニューラルネットワークに渡すための視覚拡張ラッパー。
-    """
-    def __init__(self, env):
-        super().__init__(env)
-        
-        raw_env = self.env.unwrapped
-        self.num_jammers = len(config.JAMMER_CONFIGS)
-        
-        old_dim = 2 + (self.num_jammers * 2)
-        new_dim = old_dim + (self.num_jammers * 2)
-        
-        self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(new_dim,), dtype=np.float32
-        )
-        
-        # None を使わず、最初から安全なゼロ配列（ダミー）を入れておく
-        self.prev_ego_pos = np.zeros(2, dtype=np.float32)
-        self.prev_jam_positions = [np.zeros(2, dtype=np.float32) for _ in range(self.num_jammers)]
-
-    def reset(self, seed=None, options=None):
-        obs, info = self.env.reset(seed=seed, options=options)
-        
-        # --- 初期位置の記録 ---
-        self.prev_ego_pos = obs[0:2]  # 0,1番目はエージェント
-        self.prev_jam_positions = []
-        
-        for i in range(self.num_jammers):
-            # ジャマーのx, yは2番目以降に2つずつ格納されている
-            jx_jy = obs[2 + i*2 : 4 + i*2]
-            self.prev_jam_positions.append(jx_jy)
-            
-        # リセット直後はまだ動いていないため、相対速度はすべて 0.0
-        rel_vs = np.zeros(self.num_jammers * 2, dtype=np.float32)
-        
-        # 元の観測配列の後ろに、相対速度の配列を連結（くっつける）
-        new_obs = np.concatenate([obs, rel_vs], dtype=np.float32)
-        
-        return new_obs, info
-
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        
-        # --- 1. エージェントの速度計算 ---
-        current_ego_pos = obs[0:2]
-        ego_v = current_ego_pos - self.prev_ego_pos
-        
-        rel_vs = []
-        current_jam_positions = []
-        
-        # --- 2. 各ジャマーの相対速度計算 ---
-        for i in range(self.num_jammers):
-            # 現在のジャマー位置を取得
-            jam_pos = obs[2 + i*2 : 4 + i*2]
-            
-            # ジャマーの絶対速度
-            jam_v = jam_pos - self.prev_jam_positions[i]
-            
-            # 相対速度 = 相手の速度 - 自分の速度
-            rel_v = jam_v - ego_v
-            rel_vs.extend(rel_v)
-            
-            # 次のステップのために現在の位置を保存リストへ
-            current_jam_positions.append(jam_pos)
-            
-        # --- 3. 過去の記録を更新 ---
-        self.prev_ego_pos = current_ego_pos
-        self.prev_jam_positions = current_jam_positions
-        
-        # --- 4. 新しい観測配列の作成 ---
-        rel_vs_array = np.array(rel_vs, dtype=np.float32)
-        new_obs = np.concatenate([obs, rel_vs_array], dtype=np.float32)
-        
-        return new_obs, reward, terminated, truncated, info
-
-
-class KalmanFilter2D:
-    """2次元の等速直線運動（CVモデル）用カルマンフィルタ"""
-    def __init__(self, dt=1.0, std_acc=0.03, std_meas=0.001):
-        self.dt = dt
-        # 状態ベクトル: [x, y, vx, vy]^T
-        self.x = np.zeros(4, dtype=np.float32)
-        
-        # 状態遷移行列 F (未来を予測する物理法則: 等速直線)
-        self.F = np.array([
-            [1, 0, dt, 0],
-            [0, 1, 0, dt],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1]
-        ], dtype=np.float32)
-        
-        # 観測行列 H (センサーから見えるもの＝位置 x, y のみ)
-        self.H = np.array([
-            [1, 0, 0, 0],
-            [0, 1, 0, 0]
-        ], dtype=np.float32)
-        
-        # 誤差共分散行列 P (現在の推定に対する「自信のなさ」)
-        self.P = np.eye(4, dtype=np.float32) * 1.0
-        
-        # 観測ノイズ共分散 R (センサーのブレ具合)
-        self.R = np.eye(2, dtype=np.float32) * (std_meas**2)
-        
-        # プロセスノイズ共分散 Q (想定外の動き・加速度のブレ具合)
-        # サイン波のような「直線から外れる動き」を許容するための重要なパラメータ
-        self.Q = np.eye(4, dtype=np.float32) * (std_acc**2)
-        
-    def predict(self):
-        """事前推定：現在の速度のまま進んだらどこにいるか"""
-        self.x = np.dot(self.F, self.x)
-        self.P = np.dot(np.dot(self.F, self.P), self.F.T) + self.Q
-        
-    def update(self, z):
-        """事後推定：実際の観測データ(z)を使って予測を修正する"""
-        y = z - np.dot(self.H, self.x) # 予測と実際のズレ（イノベーション）
-        S = np.dot(np.dot(self.H, self.P), self.H.T) + self.R
-        K = np.dot(np.dot(self.P, self.H.T), np.linalg.inv(S)) # カルマンゲイン
-        
-        self.x = self.x + np.dot(K, y)
-        I = np.eye(self.P.shape[0])
-        self.P = np.dot(I - np.dot(K, self.H), self.P)
-
-import gymnasium as gym
-
-# =====================================================================
-# 4. カルマンフィルタを利用する予測ラッパー
-# =====================================================================
-class KalmanPredictionWrapper(gym.Wrapper):
-    """
-    カルマンフィルタを用いてジャマーの未来軌道を予測するラッパー。
-    以前の TrajectoryPredictionWrapper の完全上位互換です。
-    """
-    def __init__(self, env, horizon_steps=20):
-        super().__init__(env)
-        self.horizon_steps = horizon_steps
-        
-        raw_env = self.env.unwrapped
-        raw_env = cast(MyJammerEnv, self.env.unwrapped)
-        self.num_jammers = raw_env.num_jammers
-        self.kfs = []
-
-    def reset(self, seed=None, options=None):
-        obs, info = self.env.reset(seed=seed, options=options)
-        
-        self.kfs = []
-        for i in range(self.num_jammers):
-            # カルマンフィルタを初期化
-            kf = KalmanFilter2D(dt=1.0, std_acc=0.03, std_meas=0.001)
-            
-            jx = obs[2 + i*2]
-            jy = obs[3 + i*2]
-            
-            # 初期位置をセット、初期速度は0のままスタート
-            kf.x[0] = jx
-            kf.x[1] = jy
-            self.kfs.append(kf)
-            
-        info['jam_preds'] = self._predict_trajectories()
-        return obs, info
-
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        
-        # 各ジャマーのカルマンフィルタを更新
-        for i in range(self.num_jammers):
-            jx = obs[2 + i*2]
-            jy = obs[3 + i*2]
-            z = np.array([jx, jy], dtype=np.float32)
-            
-            # 1. 前回の状態から今の位置を「予測」
-            self.kfs[i].predict()
-            
-            # 2. 実際の今の位置(z)を使って、内部の速度ベクトルを「修正」
-            self.kfs[i].update(z)
-            
-        # 修正された最新の速度ベクトルを使って未来軌道を生成
-        info['jam_preds'] = self._predict_trajectories()
-        return obs, reward, terminated, truncated, info
-
-    def _predict_trajectories(self):
-        all_preds = []
-        for kf in self.kfs:
-            pred_traj = []
-            
-            # 未来をシミュレーションするために、現在の状態(x, y, vx, vy)をコピー
-            sim_x = np.copy(kf.x)
-            
-            for _ in range(self.horizon_steps):
-                # 状態遷移行列 F を掛けて、1歩未来へ進める
-                sim_x = np.dot(kf.F, sim_x)
-                
-                # 世界の果て（壁）での反射ロジック
-                if sim_x[0] < -2.0 or sim_x[0] > 2.0:
-                    sim_x[2] = -sim_x[2] # X方向の速度ベクトルを反転
-                    sim_x[0] = np.clip(sim_x[0], -2.0, 2.0)
-                if sim_x[1] < -2.0 or sim_x[1] > 2.0:
-                    sim_x[3] = -sim_x[3] # Y方向の速度ベクトルを反転
-                    sim_x[1] = np.clip(sim_x[1], -2.0, 2.0)
-                    
-                pred_traj.append((sim_x[0], sim_x[1]))
-                
-            all_preds.append(pred_traj)
-            
-        return all_preds
-
-# =====================================================================
-# 5. 人工ポテンシャル法で滑らかに離れる回避ラッパー
+# 6. 人工ポテンシャル法で滑らかに離れる回避ラッパー
 # =====================================================================
 class PotentialFieldShieldWrapper(gym.Wrapper):
     """
     人工ポテンシャル法（APF）を用いた安全シールド。
     AIの行動を「引力」、予測されるジャマーからの危険度を「斥力」とし、
     それらの合力ベクトルを計算して滑らかに回避する。
+    latest_preds：jammerの未来のデータ
     """
     def __init__(self, env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05):
         super().__init__(env)
@@ -422,6 +509,7 @@ class PotentialFieldShieldWrapper(gym.Wrapper):
         self.latest_preds = []
 
     def reset(self, seed=None, options=None):
+        # envのresetの戻り値の配列のほうを、latest_predsに格納しておく
         obs, info = self.env.reset(seed=seed, options=options)
         self.latest_preds = info.get('jam_preds', [])
         return obs, info
@@ -446,6 +534,7 @@ class PotentialFieldShieldWrapper(gym.Wrapper):
         if not self.latest_preds:
             return action
             
+        # MyJammerEnv型にキャストしないとエラーが出る
         raw_env = cast(MyJammerEnv, self.env.unwrapped)
         current_pos = raw_env.location
         
@@ -494,96 +583,8 @@ class PotentialFieldShieldWrapper(gym.Wrapper):
 
         # AIが出力した本来の行動の「速さ（ベクトルの長さ）」は維持しつつ、
         # 合力によって「向き」だけを滑らかに曲げる処理
-        if total_norm > 1e-5:
+        if 1e-5 < total_norm :
             safe_action = (F_total / total_norm) * action_norm
             return safe_action
         else:
             return np.zeros(2, dtype=np.float32) # 合力がゼロ（完全に相殺）なら急停止
-
-
-# =====================================================================
-# 5. モンテカルロ法を利用した予測ラッパー
-# =====================================================================
-class MonteCarloPredictionWrapper(gym.Wrapper):
-    """
-    モンテカルロ法でジャマーの未来軌道を予測するラッパー。
-    各ジャマーについて複数サンプルの軌道を生成し、その平均を予測とする。
-    """
-
-    def __init__(self, env, horizon_steps=20, num_samples=30, noise_std=0.05):
-        super().__init__(env)
-        self.horizon_steps = horizon_steps
-        self.num_samples = num_samples
-        self.noise_std = noise_std
-
-        raw_env = cast(MyJammerEnv, self.env.unwrapped)
-        self.num_jammers = raw_env.num_jammers
-
-        # 前ステップ位置（速度推定用）
-        self.prev_positions = [np.zeros(2, dtype=np.float32) for _ in range(self.num_jammers)]
-
-    def reset(self, seed=None, options=None):
-        obs, info = self.env.reset(seed=seed, options=options)
-
-        self.prev_positions = []
-        for i in range(self.num_jammers):
-            pos = obs[2 + i*2 : 4 + i*2]
-            self.prev_positions.append(pos)
-
-        info['jam_preds'] = self._predict(obs)
-        return obs, info
-
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-
-        info['jam_preds'] = self._predict(obs)
-
-        # 更新
-        for i in range(self.num_jammers):
-            self.prev_positions[i] = obs[2 + i*2 : 4 + i*2]
-
-        return obs, reward, terminated, truncated, info
-
-    def _predict(self, obs):
-        all_preds = []
-
-        for i in range(self.num_jammers):
-            current_pos = obs[2 + i*2 : 4 + i*2]
-            prev_pos = self.prev_positions[i]
-
-            # 速度推定（単純差分）
-            velocity = current_pos - prev_pos
-
-            samples = []
-
-            for _ in range(self.num_samples):
-                traj = []
-                sim_pos = np.copy(current_pos)
-                sim_vel = np.copy(velocity)
-
-                for _ in range(self.horizon_steps):
-                    # ランダムノイズ追加（ここがモンテカルロ）
-                    noise = np.random.normal(0, self.noise_std, size=2)
-                    sim_vel = sim_vel + noise
-
-                    sim_pos = sim_pos + sim_vel
-
-                    # 壁反射
-                    for d in range(2):
-                        if sim_pos[d] < -2.0 or sim_pos[d] > 2.0:
-                            sim_vel[d] = -sim_vel[d]
-                            sim_pos[d] = np.clip(sim_pos[d], -2.0, 2.0)
-
-                    traj.append(sim_pos.copy())
-
-                samples.append(traj)
-
-            # サンプル平均を取る
-            mean_traj = []
-            for t in range(self.horizon_steps):
-                mean_pos = np.mean([samples[s][t] for s in range(self.num_samples)], axis=0)
-                mean_traj.append((mean_pos[0], mean_pos[1]))
-
-            all_preds.append(mean_traj)
-
-        return all_preds

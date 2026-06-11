@@ -88,7 +88,7 @@ class JammerState:
             # 始点と終点の間を、progressの割合で直線補間
             pos = self.start_pos + (self.end_pos - self.start_pos) * self.progress
             self.x, self.y = pos[0], pos[1]
-            
+        
         elif self.type == "sin_wave":
             # 1. まず直線の基準位置を出す
             base_pos = self.start_pos + (self.end_pos - self.start_pos) * self.progress
@@ -97,7 +97,7 @@ class JammerState:
             # 3. 基準位置にズレを足し合わせる
             pos = base_pos + self.perpendicular_unit * wave_offset
             self.x, self.y = pos[0], pos[1]
-            
+        
         elif self.type == "circle":
             # 三角関数で円を描く
             self.x = self.cx + self.size * math.cos(self.t)

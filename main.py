@@ -179,30 +179,45 @@ def draw_from_csv(now_time, prediction_snapshots=None):
     plt.plot(x_history, y_history, color='blue', marker='.', linestyle='-', linewidth=1.5, label='Agent Trajectory', zorder=4)
     plt.scatter(x_history[0], y_history[0], color='green', marker='o', s=100, label='Start', zorder=5)
     
-    # 引数で直接受け取ったメモリ上の予測リストを展開して描画
-    # if prediction_snapshots is not None:
-    #     for idx, shot in enumerate(prediction_snapshots):
-    #         a_pos = shot["agent_pos"]
-    #         all_jam_preds = shot["preds"]
+    # 🌟 改善部分：予測リストの描画ロジック
+    if prediction_snapshots:
+        for idx, shot in enumerate(prediction_snapshots):
+            a_pos = shot["agent_pos"]
+            all_jam_preds = shot["preds"]
             
-    #         # 予測が行われた位置に小さな黒丸を打つ
-    #         plt.scatter(a_pos[0], a_pos[1], color='black', marker='o', s=25, zorder=5)
+            # ① 予測が行われた位置に小さな黒丸を打つ
+            trigger_label = "Prediction Trigger" if idx == 0 else ""
+            plt.scatter(a_pos[0], a_pos[1], color='black', marker='o', s=30, zorder=6, label=trigger_label)
             
-    #         # 予測軌道を描画
-    #         for jam_idx, pred_traj in enumerate(all_jam_preds):
-    #             px = [pt[0] for pt in pred_traj]
-    #             py = [pt[1] for pt in pred_traj]
+            # モンテカルロ判定：ジャマー数より予測軌道の数が多い場合は透過度を下げる
+            is_monte_carlo = len(all_jam_preds) > num_jammers
+            alpha_val = 0.15 if is_monte_carlo else 0.9
+            lw_val = 1.0 if is_monte_carlo else 2.5
+            
+            # ② 予測軌道を描画
+            for jam_idx, pred_traj in enumerate(all_jam_preds):
+                # どのジャマーに対する予測かを計算して色を合わせる
+                # （モンテカルロでジャマー1機につき50本出るような構造に対応）
+                target_jammer_id = jam_idx % max(1, num_jammers)
+                c = colors[target_jammer_id % len(colors)]
                 
-    #             label = "Jammer Prediction" if idx == 0 and jam_idx == 0 else ""
-    #             plt.plot(px, py, color='darkorange', linestyle=':', alpha=0.7, linewidth=1.8, label=label, zorder=2)
+                px = [pt[0] for pt in pred_traj]
+                py = [pt[1] for pt in pred_traj]
+                
+                pred_label = "Predicted Traj" if idx == 0 and jam_idx < num_jammers else ""
+                plt.plot(px, py, color=c, linestyle=':', alpha=alpha_val, linewidth=lw_val, zorder=4, label=pred_label)
 
     plt.title(f"Dynamic Jammer Evasion ({now_time})")
     plt.xlabel("X")
     plt.ylabel("Y")
     plt.grid(True, linestyle='--', alpha=0.7)
     
-    # 凡例を外側に配置
-    plt.legend(loc='upper left', bbox_to_anchor=(1.05, 1))
+    # 凡例の重複を整理して外側に配置
+    handles, labels = plt.gca().get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    by_label = {k: v for k, v in by_label.items() if k} # 空のラベルを除去
+    plt.legend(by_label.values(), by_label.keys(), loc='upper left', bbox_to_anchor=(1.05, 1))
+    
     plt.tight_layout()
     
     img_path = os.path.join(config.OUTPUT_DIR, f"trajectory_{now_time}.png")
@@ -222,35 +237,35 @@ def main():
     # 実験スイッチ：実行したい手法を1つだけ選び、コメントを外してください
     # ==========================================
 
-    # 【手法1】純粋な強化学習（座標のみ）
+    # 【実験1】純粋な強化学習（座標のみ）
     # env = raw_env
 
-    # 【手法2】強化学習 ＋ 予測シールド（CVモデル: 等速直線）
+    # 【実験2】強化学習 ＋ 直線予測　＋　シールド
     # env = TrajectoryPredictionWrapper(raw_env, history_length=2, horizon_steps=20)
     # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
 
-    # 【手法3】強化学習 ＋ 速度ベクトル入力
+    # 【実験3】強化学習 ＋ 速度ベクトル入力
     # env = VelocityObservationWrapper(raw_env)
 
-    # 【手法4】ハイブリッド（速度入力 ＋ CV予測シールド）
+    # 【実験4】ハイブリッド（速度入力 ＋ CV予測シールド）
     # env = VelocityObservationWrapper(raw_env)
     # env = TrajectoryPredictionWrapper(env, history_length=2, horizon_steps=20)
     # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
 
-    # 【手法5】最新ハイブリッド（速度入力 ＋ カルマンフィルタ予測シールド）
-    # env = VelocityObservationWrapper(raw_env)
-    # env = KalmanPredictionWrapper(env, horizon_steps=20)
-    # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
+    # 【実験5】最新ハイブリッド（速度入力 ＋ カルマンフィルタ予測シールド）
+    env = VelocityObservationWrapper(raw_env)
+    env = KalmanPredictionWrapper(env, horizon_steps=20)
+    env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
 
-    # 【手法6】カルマン予測 ＋ 人工ポテンシャル法シールド（APF）
+    # 【実験6】カルマン予測 ＋ 人工ポテンシャル法シールド（APF）
     # env = VelocityObservationWrapper(raw_env)
     # env = KalmanPredictionWrapper(env, horizon_steps=20)
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
 
-    # 【手法7】モンテカルロ法予測 ＋　人工ポテンシャルシールド（APF）
-    env = VelocityObservationWrapper(raw_env)
-    env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
-    env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
+    # 【実験7】モンテカルロ法予測 ＋　人工ポテンシャルシールド（APF）
+    # env = VelocityObservationWrapper(raw_env)
+    # env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
+    # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
     #------------------------------------------------
 
     # 環境envを利用して学習を実行する
