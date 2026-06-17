@@ -7,6 +7,7 @@ from stable_baselines3 import TD3
 from stable_baselines3.common.callbacks import BaseCallback
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import matplotlib.animation as animation
 
 # 自作ファイルインポート
 import config
@@ -225,6 +226,108 @@ def draw_from_csv(now_time, prediction_snapshots=None):
     plt.close()
     print(f"軌跡の画像を保存しました: {img_path}")
 
+# CSVデータから時系列のGIFアニメーションを生成する関数
+def create_animation_from_csv(now_time):
+    csv_path = os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv")
+
+    x_history, y_history = [], []
+    jammer_histories = {} 
+    
+    with open(csv_path, "r") as file:
+        reader = csv.reader(file)
+        header = next(reader)
+        if len(header) < 3:
+            raise ValueError(f"Invalid CSV header in {csv_path}")
+        num_jammers = (len(header) - 3) // 2
+
+        for i in range(num_jammers):
+            jammer_histories[i] = {'x': [], 'y': []}
+
+        for row in reader:
+            if len(row) < 3 + num_jammers * 2:
+                continue
+            x_history.append(float(row[1]))
+            y_history.append(float(row[2]))
+            for i in range(num_jammers):
+                jammer_histories[i]['x'].append(float(row[3 + i*2]))
+                jammer_histories[i]['y'].append(float(row[4 + i*2]))
+
+    if not x_history:
+        return
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.set_xlim(-2.0, 2.0)
+    ax.set_ylim(-2.0, 2.0)
+    ax.set_aspect('equal')
+    gx, gy = config.GOAL_POS
+    ax.scatter(gx, gy, color='red', marker='*', s=200, label='Goal', zorder=5)
+
+    # 動かすオブジェクトの初期化
+    agent_dot, = ax.plot([], [], 'bo', markersize=8, zorder=6, label='Agent')
+    agent_tail, = ax.plot([], [], 'b-', linewidth=1.5, alpha=0.4, zorder=3)
+
+    jammer_dots = []
+    jammer_tails = []
+    jammer_circles = []
+    colors = ['orange', 'purple', 'cyan', 'brown', 'pink']
+
+    for i in range(num_jammers):
+        c = colors[i % len(colors)]
+        jd, = ax.plot([], [], marker='o', color=c, markersize=8, zorder=5, label=f'Jammer {i+1}')
+        jt, = ax.plot([], [], color=c, linestyle='--', linewidth=1.5, alpha=0.4, zorder=3)
+        jc = patches.Circle((20, 20), radius=config.OBSTACLE_RADIUS, color='grey', alpha=0.4, zorder=2)
+        ax.add_patch(jc)
+        
+        jammer_dots.append(jd)
+        jammer_tails.append(jt)
+        jammer_circles.append(jc)
+
+    time_text = ax.text(0.05, 0.95, '', transform=ax.transAxes, fontsize=12, fontweight='bold')
+    ax.set_title(f"Dynamic Jammer Evasion Animation ({now_time})")
+    ax.grid(True, linestyle='--', alpha=0.7)
+    
+    # 凡例の設定
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys(), loc='upper left', bbox_to_anchor=(1.05, 1))
+    fig.tight_layout()
+
+    # 初期化関数
+    def init():
+        agent_dot.set_data([], [])
+        agent_tail.set_data([], [])
+        for i in range(num_jammers):
+            jammer_dots[i].set_data([], [])
+            jammer_tails[i].set_data([], [])
+            jammer_circles[i].center = (20, 20)
+        time_text.set_text('')
+        return [agent_dot, agent_tail, time_text] + jammer_dots + jammer_tails + jammer_circles
+
+    # コマごとの更新関数
+    def update(frame):
+        # エージェントの現在位置と軌跡
+        agent_dot.set_data([x_history[frame]], [y_history[frame]])
+        agent_tail.set_data(x_history[:frame+1], y_history[:frame+1])
+
+        # ジャマーの現在位置と軌跡とバリア円
+        for i in range(num_jammers):
+            jx = jammer_histories[i]['x'][frame]
+            jy = jammer_histories[i]['y'][frame]
+            jammer_dots[i].set_data([jx], [jy])
+            jammer_tails[i].set_data(jammer_histories[i]['x'][:frame+1], jammer_histories[i]['y'][:frame+1])
+            jammer_circles[i].center = (jx, jy)
+
+        time_text.set_text(f'Step: {frame}')
+        return [agent_dot, agent_tail, time_text] + jammer_dots + jammer_tails + jammer_circles
+
+    # アニメーション作成 (interval=50 はコマの切り替え速度: 50ミリ秒)
+    ani = animation.FuncAnimation(fig, update, frames=len(x_history), init_func=init, blit=True, interval=50)
+
+    gif_path = os.path.join(config.OUTPUT_DIR, f"animation_{now_time}.gif")
+    ani.save(gif_path, writer='pillow')
+    plt.close()
+    print(f"動的軌跡のGIFアニメーションを保存しました: {gif_path}")
+
 
 def main():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
@@ -264,9 +367,9 @@ def main():
     env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
 
     # 実験7のパラメータ変更
-    env = VelocityObservationWrapper(raw_env)
-    env = MonteCarloPredictionWrapper(env, horizon_steps=10, num_samples=30)
-    env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
+    # env = VelocityObservationWrapper(raw_env)
+    # env = MonteCarloPredictionWrapper(env, horizon_steps=10, num_samples=30)
+    # env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
     #------------------------------------------------
 
     # 環境envを利用して学習を実行する
@@ -281,7 +384,9 @@ def main():
     
     # 受け取ったリストをそのまま draw_from_csv に引き渡す
     draw_from_csv(now_time, pred_snapshots)
-
+    
+    # 同じCSVを読み込んでGIFアニメーションを出力する
+    create_animation_from_csv(now_time)
 
 if __name__ == "__main__":
     main()
