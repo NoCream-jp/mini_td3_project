@@ -179,7 +179,7 @@ def draw_from_csv(now_time, prediction_snapshots=None):
     plt.plot(x_history, y_history, color='blue', marker='.', linestyle='-', linewidth=1.5, label='Agent Trajectory', zorder=4)
     plt.scatter(x_history[0], y_history[0], color='green', marker='o', s=100, label='Start', zorder=5)
     
-    # 🌟 改善部分：予測リストの描画ロジック
+    # 予測リストの描画
     if prediction_snapshots:
         for idx, shot in enumerate(prediction_snapshots):
             a_pos = shot["agent_pos"]
@@ -233,10 +233,6 @@ def main():
     # 0. まず生の環境を作成
     raw_env = MyJammerEnv()
 
-    # ==========================================
-    # 実験スイッチ：実行したい手法を1つだけ選び、コメントを外してください
-    # ==========================================
-
     # 【実験1】純粋な強化学習（座標のみ）
     # env = raw_env
 
@@ -253,9 +249,9 @@ def main():
     # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
 
     # 【実験5】最新ハイブリッド（速度入力 ＋ カルマンフィルタ予測シールド）
-    env = VelocityObservationWrapper(raw_env)
-    env = KalmanPredictionWrapper(env, horizon_steps=20)
-    env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
+    # env = VelocityObservationWrapper(raw_env)
+    # env = KalmanPredictionWrapper(env, horizon_steps=20)
+    # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
 
     # 【実験6】カルマン予測 ＋ 人工ポテンシャル法シールド（APF）
     # env = VelocityObservationWrapper(raw_env)
@@ -263,9 +259,14 @@ def main():
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
 
     # 【実験7】モンテカルロ法予測 ＋　人工ポテンシャルシールド（APF）
-    # env = VelocityObservationWrapper(raw_env)
-    # env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
-    # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
+    env = VelocityObservationWrapper(raw_env)
+    env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
+    env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
+
+    # 実験7のパラメータ変更
+    env = VelocityObservationWrapper(raw_env)
+    env = MonteCarloPredictionWrapper(env, horizon_steps=10, num_samples=30)
+    env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
     #------------------------------------------------
 
     # 環境envを利用して学習を実行する

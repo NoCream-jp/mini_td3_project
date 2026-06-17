@@ -43,20 +43,16 @@ SAMPLE_JAMMER_CONFIGS = [
     }
 ]
 """
+
 JAMMER_CONFIGS = [
+    # 確実に当たるように向かってくるsin波
     {
-        # 左側の壁役
-        "type": "linear_cross", 
-        "start_pos": [-1.0, -2.0], # 下から
-        "end_pos": [-1.0, 1.4],     # 上へ
-        "speed": 0.04,
-    },
-    {
-        # 右側の壁役（少し間隔を空けて並走）
-        "type": "linear_cross", 
-        "start_pos": [-0.2, -2.0], # 下から
-        "end_pos": [-0.2, 2.0],     # 上へ
-        "speed": 0.04,
+        "type": "sin_wave", 
+        "start_pos": [-2.0, -2.0],  # ゴールからスタート
+        "end_pos": [2.0, 2.0],      # エージェントの初期位置へ向かって逆走
+        "amplitude": 0.4,           # 避けられるギリギリの道幅を残す
+        "frequency": 6.0,
+        "speed": 0.1,
     }
 ]
 
