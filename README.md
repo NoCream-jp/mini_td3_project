@@ -108,6 +108,10 @@ mini_td3_project/
 
 - 結果について考察
 
-## 直近の変更
+## 報酬の平均を出力するためのワークフロー
 
-###　何をしたか、なぜしたか
+1. config.pyでEXP_NAMEを"aiueo"に設定し、wrapperのパラメータなどは変更せずに5回実行する。
+
+2. outputs/ に、"aiueo"が名前に含まれているcsvが5つあることを確認する。
+
+3. config.pyでTARGET_NAMEが"aiueo"になっているか確認し、draw_average_reward.pyを実行する。

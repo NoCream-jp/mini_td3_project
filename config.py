@@ -2,6 +2,14 @@ import os
 
 OUTPUT_DIR = "outputs"
 
+# 5回連続実験する際の手法名　手法、パラメータごとに一意に設定する
+# 命名規則も整備すべき
+EXP_NAME = "V7_LOW_PARALLEL"
+
+# 5回連続実験したあと、平均を出したい手法名
+TARGET_NAME = "V7_LOW_PARALLEL"
+
+
 # 学習する総エピソード数
 TOTAL_EPISODES = 500
 # 1エピソードの最大ステップ数
@@ -13,9 +21,8 @@ AGENT_START_POS = [2.0, 2.0]
 GOAL_POS = [-2.0, -2.0]
 
 # Jammerの設定
-# type: "sin_wave" を新設。
-# 指定したスタート[2.0, 0]から左[-2.0, 0]へ向かってパトロールしつつ、Y軸方向に波形に揺れる
 """
+設定例
 SAMPLE_JAMMER_CONFIGS = [
     {
         # ① 直線運動（start_pos と end_pos が必須）
@@ -43,9 +50,7 @@ SAMPLE_JAMMER_CONFIGS = [
     }
 ]
 """
-
 JAMMER_CONFIGS = [
-    # 確実に当たるように向かってくるsin波
     {
         "type": "sin_wave", 
         "start_pos": [-2.0, -2.0],  # ゴールからスタート

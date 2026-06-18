@@ -8,6 +8,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.animation as animation
+import glob
 
 # 自作ファイルインポート
 import config
@@ -49,10 +50,11 @@ class EpisodeLoggerCallback(BaseCallback):
                 return False
         return True
 
+# 学習を進める
 def learn_td3(env):
     # ノイズ設定(ランダム性を持たせる設定)
     n_actions = env.action_space.shape[-1]
-    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.3 * np.ones(n_actions))
+    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=np.ones(n_actions) * 0.3)
     # モデル用意
     model = TD3("MlpPolicy", env, action_noise=action_noise, verbose=1)
     # コールバック用意
@@ -65,7 +67,7 @@ def learn_td3(env):
     model.save(os.path.join(config.OUTPUT_DIR, "simple_td3_model"))
     return model, callback.episode_rewards
 
-# テストエピソード(1周だけ)を回し、記録するために呼ばれる関数
+# 本番テストエピソード(1周だけ)を回し、記録するために呼ばれる関数
 def actual_test(now_time, model, env):
     num_jammers = env.unwrapped.num_jammers
     prediction_snapshots = []
@@ -76,15 +78,14 @@ def actual_test(now_time, model, env):
         header = ["step", "agent_x", "agent_y"]
         for i in range(num_jammers):
             header.extend([f"j{i}_x", f"j{i}_y"])
+        header.append("reward") # jammerの数にも動的に対応できるよう最後に報酬を付け足すようにする
         writer.writerow(header)
         
-        # 修正：無理な上書きをすべて廃止し、この1行だけで完璧に同期させて初期化する
         obs, info = env.reset(options={"start_pos": config.AGENT_START_POS})
         
         for i in range(config.MAX_STEPS_PER_EPISODE):
             action, _ = model.predict(obs, deterministic=True)
             
-            # 30ステップごとに、純粋な数値を複製してメモリに保存
             if i % 30 == 0 and 'jam_preds' in info:
                 agent_pos = (env.unwrapped.location[0], env.unwrapped.location[1])
                 prediction_snapshots.append({
@@ -93,19 +94,19 @@ def actual_test(now_time, model, env):
                     "preds": copy.deepcopy(info['jam_preds'])
                 })
             
-            # stepを進める
-            obs, _, finish_flag, over_step_flag, info = env.step(action)
+            # 既存のコードのままで、ここで reward を受け取っています
+            obs, reward, finish_flag, over_step_flag, info = env.step(action)
             
-            # obsからデータを抽出して行を作成
+            # 行データの最後にも reward を追加
             row_data = [i, obs[0], obs[1]]
             for j in range(num_jammers):
                 row_data.extend([obs[2 + j*2], obs[3 + j*2]])
+            row_data.append(reward)
             
             writer.writerow(row_data) 
             
-            # ここで激突（finish_flag）したら、即座にループを抜けてログ保存を終了する
             if finish_flag or over_step_flag:
-                print(f"★本番テスト：ステップ {i} で衝突判定、または終了条件を検知しました。")
+                print(f"本番テスト：ステップ {i} で衝突判定、または終了条件を検知しました。")
                 break
                 
     return prediction_snapshots
@@ -141,13 +142,13 @@ def draw_from_csv(now_time, prediction_snapshots=None):
         header = next(reader)
         if len(header) < 3:
             raise ValueError(f"Invalid CSV header in {csv_path}")
-        num_jammers = (len(header) - 3) // 2
+        num_jammers = (len(header) - 4) // 2
 
         for i in range(num_jammers):
             jammer_histories[i] = {'x': [], 'y': []}
 
         for row in reader:
-            if len(row) < 3 + num_jammers * 2:
+            if len(row) < 4 + num_jammers * 2:
                 continue
             x_history.append(float(row[1]))
             y_history.append(float(row[2]))
@@ -239,13 +240,13 @@ def create_animation_from_csv(now_time):
         header = next(reader)
         if len(header) < 3:
             raise ValueError(f"Invalid CSV header in {csv_path}")
-        num_jammers = (len(header) - 3) // 2
+        num_jammers = (len(header) - 4) // 2
 
         for i in range(num_jammers):
             jammer_histories[i] = {'x': [], 'y': []}
 
         for row in reader:
-            if len(row) < 3 + num_jammers * 2:
+            if len(row) < 4 + num_jammers * 2:
                 continue
             x_history.append(float(row[1]))
             y_history.append(float(row[2]))
@@ -329,6 +330,86 @@ def create_animation_from_csv(now_time):
     plt.close()
     print(f"動的軌跡のGIFアニメーションを保存しました: {gif_path}")
 
+# 直近5回のcsvから報酬の平均値を出す関数。同じ設定で5回実行してから呼び出す
+def draw_reward_average(csv_pattern_or_list, output_filename="averaged_test_reward.png"):
+    """
+    複数のテストログCSVから各ステップのrewardを拾い、平均と標準偏差を描画する
+    """
+    # 文字列パターン（例: "outputs/test_*.csv"）ならファイルリストを取得、リストならそのまま使用
+    if isinstance(csv_pattern_or_list, str):
+        file_list = sorted(glob.glob(csv_pattern_or_list))[-5:] # 直近の5個を取得
+    else:
+        file_list = csv_pattern_or_list
+
+    if not file_list:
+        print("指定されたテストCSVファイルが見つかりません。")
+        return
+
+    print(f"以下の {len(file_list)} 個のCSVから報酬を平均化します:")
+    for f in file_list:
+        print(f" - {f}")
+
+    all_runs_rewards = []
+    max_steps = 0
+
+    # 1. 各ファイルから最右列の reward を読み込む
+    for file in file_list:
+        run_rewards = []
+        with open(file, "r") as f:
+            reader = csv.reader(f)
+            header = next(reader)
+            # rewardが右端（最後のインデックス）にあることを確認
+            reward_idx = len(header) - 1 
+            
+            for row in reader:
+                if len(row) > reward_idx:
+                    run_rewards.append(float(row[reward_idx]))
+        
+        all_runs_rewards.append(run_rewards)
+        max_steps = max(max_steps, len(run_rewards))
+
+    # 2. 異なるステップ数（途中で衝突終了など）に対応するため、長さを揃えてNumPy化
+    # 終了したステップ以降は、そのエピソードの最終報酬（衝突ペナルティなど）か0でパディング
+    padded_rewards = []
+    for run_rewards in all_runs_rewards:
+        if len(run_rewards) < max_steps:
+            # 途中で終わっている場合は最後の報酬値（ペナルティ）を末尾まで引き伸ばす
+            last_val = run_rewards[-1] if run_rewards else 0.0
+            extended = run_rewards + [last_val] * (max_steps - len(run_rewards))
+            padded_rewards.append(extended)
+        else:
+            padded_rewards.append(run_rewards)
+
+    rewards_array = np.array(padded_rewards)
+    
+    # 3. ステップごとの平均と標準偏差を計算
+    mean_rewards = np.mean(rewards_array, axis=0)
+    std_rewards = np.std(rewards_array, axis=0)
+    steps_range = range(max_steps)
+
+    # 4. 描画
+    plt.figure(figsize=(9, 5))
+    
+    # 標準偏差の幅を薄い赤で塗りつぶし
+    plt.fill_between(steps_range, 
+                     mean_rewards - std_rewards, 
+                     mean_rewards + std_rewards, 
+                     color='red', alpha=0.15, label='Reward Deviation')
+    
+    # 平均報酬を赤い実線で描画
+    plt.plot(steps_range, mean_rewards, color='red', linewidth=2.0, label=f'Mean Step Reward (n={len(file_list)})')
+    
+    plt.title("Step-by-Step Reward Analysis (Test Evaluation)")
+    plt.xlabel("Simulation Steps")
+    plt.ylabel("Instantaneous Reward")
+    plt.grid(True, linestyle=':', alpha=0.7)
+    plt.legend(loc='upper right')
+    plt.tight_layout()
+    
+    img_path = os.path.join(config.OUTPUT_DIR, output_filename)
+    plt.savefig(img_path)
+    plt.close()
+    print(f"★ステップ報酬の平均化グラフを保存しました: {img_path}")
 
 def main():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
@@ -363,31 +444,36 @@ def main():
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
 
     # 【実験7】モンテカルロ法予測 ＋　人工ポテンシャルシールド（APF）
-    env = VelocityObservationWrapper(raw_env)
-    env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
-    env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
+    # env = VelocityObservationWrapper(raw_env)
+    # env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
+    # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
 
     # 実験7のパラメータ変更
-    # env = VelocityObservationWrapper(raw_env)
-    # env = MonteCarloPredictionWrapper(env, horizon_steps=10, num_samples=30)
-    # env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
+    env = VelocityObservationWrapper(raw_env)
+    env = MonteCarloPredictionWrapper(env, horizon_steps=10, num_samples=30)
+    env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
     #------------------------------------------------
 
     # 環境envを利用して学習を実行する
     model, rewards_history = learn_td3(env)
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
-    
+    run_id = f"{config.EXP_NAME}_{now_time}"
+
+    print(f"\n=========================================")
+    print(f" 🚀 実験開始: {config.EXP_NAME} (ID: {run_id})")
+    print(f"=========================================\n")
+
     # 学習時のスコアの描画
-    draw_score(now_time, rewards_history)
+    draw_score(run_id, rewards_history)
     
     # actual_test から予測リストを受け取る
-    pred_snapshots = actual_test(now_time, model, env)
+    pred_snapshots = actual_test(run_id, model, env)
     
     # 受け取ったリストをそのまま draw_from_csv に引き渡す
-    draw_from_csv(now_time, pred_snapshots)
+    draw_from_csv(run_id, pred_snapshots)
     
     # 同じCSVを読み込んでGIFアニメーションを出力する
-    create_animation_from_csv(now_time)
+    create_animation_from_csv(run_id)
 
 if __name__ == "__main__":
     main()
