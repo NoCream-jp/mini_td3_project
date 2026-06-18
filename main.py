@@ -27,7 +27,7 @@ from my_wrappers import (
     MonteCarloPredictionWrapper
 )
 
-# コールバック関数
+# コールバック関数ふくむクラス
 ## データロガー
 class EpisodeLoggerCallback(BaseCallback):
     def __init__(self, total_episodes: int, verbose=0):
@@ -64,24 +64,6 @@ def learn_td3(env):
     # save
     model.save(os.path.join(config.OUTPUT_DIR, "simple_td3_model"))
     return model, callback.episode_rewards
-
-def draw_score(now_time, rewards):
-    plt.figure(figsize=(8, 5))
-    plt.plot(range(1, len(rewards) + 1), rewards, color='green', linewidth=1.5, label='Episode Reward')
-    plt.title(f"Learning Curve ({now_time})")
-    plt.xlabel("Episodes")
-    plt.ylabel("Cumulative Reward (Symlog Scale)")
-    plt.yscale('symlog', linthresh=100)
-    plt.ylim(-2500, 1500)
-    plt.axhline(0, color='black', linewidth=1.0, linestyle='--', zorder=1)
-
-    plt.grid(True, linestyle=':', alpha=0.7)
-    plt.legend()
-    
-    img_path = os.path.join(config.OUTPUT_DIR, f"score_{now_time}.png")
-    plt.savefig(img_path)
-    plt.close()
-    print(f"学習スコアの画像を保存しました: {img_path}")
 
 # テストエピソード(1周だけ)を回し、記録するために呼ばれる関数
 def actual_test(now_time, model, env):
@@ -127,6 +109,25 @@ def actual_test(now_time, model, env):
                 break
                 
     return prediction_snapshots
+
+# 報酬可視化関数
+def draw_score(now_time, rewards):
+    plt.figure(figsize=(8, 5))
+    plt.plot(range(1, len(rewards) + 1), rewards, color='green', linewidth=1.5, label='Episode Reward')
+    plt.title(f"Learning Curve ({now_time})")
+    plt.xlabel("Episodes")
+    plt.ylabel("Cumulative Reward (Symlog Scale)")
+    plt.yscale('symlog', linthresh=100)
+    plt.ylim(-2500, 1500)
+    plt.axhline(0, color='black', linewidth=1.0, linestyle='--', zorder=1)
+
+    plt.grid(True, linestyle=':', alpha=0.7)
+    plt.legend()
+    
+    img_path = os.path.join(config.OUTPUT_DIR, f"score_{now_time}.png")
+    plt.savefig(img_path)
+    plt.close()
+    print(f"学習スコアの画像を保存しました: {img_path}")
 
 # 最後のテスト試行で生成したcsvから描画する関数
 def draw_from_csv(now_time, prediction_snapshots=None):
@@ -375,7 +376,7 @@ def main():
     # 環境envを利用して学習を実行する
     model, rewards_history = learn_td3(env)
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
-
+    
     # 学習時のスコアの描画
     draw_score(now_time, rewards_history)
     

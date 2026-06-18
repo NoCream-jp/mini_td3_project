@@ -305,6 +305,9 @@ class MonteCarloPredictionWrapper(gym.Wrapper):
     """
     モンテカルロ法でジャマーの未来軌道を予測するラッパー。
     各ジャマーについて複数サンプルの軌道を生成し、その平均を予測とする。
+    horizon_steps: 予測歩数、
+    num_samples: 予測確率分布の密度、予測の本数
+    noise_std: ノイズの標準偏差（大きくなるほどノイズが増える）
     """
 
     def __init__(self, env, horizon_steps=20, num_samples=30, noise_std=0.05):
