@@ -330,87 +330,6 @@ def create_animation_from_csv(now_time):
     plt.close()
     print(f"動的軌跡のGIFアニメーションを保存しました: {gif_path}")
 
-# 直近5回のcsvから報酬の平均値を出す関数。同じ設定で5回実行してから呼び出す
-def draw_reward_average(csv_pattern_or_list, output_filename="averaged_test_reward.png"):
-    """
-    複数のテストログCSVから各ステップのrewardを拾い、平均と標準偏差を描画する
-    """
-    # 文字列パターン（例: "outputs/test_*.csv"）ならファイルリストを取得、リストならそのまま使用
-    if isinstance(csv_pattern_or_list, str):
-        file_list = sorted(glob.glob(csv_pattern_or_list))[-5:] # 直近の5個を取得
-    else:
-        file_list = csv_pattern_or_list
-
-    if not file_list:
-        print("指定されたテストCSVファイルが見つかりません。")
-        return
-
-    print(f"以下の {len(file_list)} 個のCSVから報酬を平均化します:")
-    for f in file_list:
-        print(f" - {f}")
-
-    all_runs_rewards = []
-    max_steps = 0
-
-    # 1. 各ファイルから最右列の reward を読み込む
-    for file in file_list:
-        run_rewards = []
-        with open(file, "r") as f:
-            reader = csv.reader(f)
-            header = next(reader)
-            # rewardが右端（最後のインデックス）にあることを確認
-            reward_idx = len(header) - 1 
-            
-            for row in reader:
-                if len(row) > reward_idx:
-                    run_rewards.append(float(row[reward_idx]))
-        
-        all_runs_rewards.append(run_rewards)
-        max_steps = max(max_steps, len(run_rewards))
-
-    # 2. 異なるステップ数（途中で衝突終了など）に対応するため、長さを揃えてNumPy化
-    # 終了したステップ以降は、そのエピソードの最終報酬（衝突ペナルティなど）か0でパディング
-    padded_rewards = []
-    for run_rewards in all_runs_rewards:
-        if len(run_rewards) < max_steps:
-            # 途中で終わっている場合は最後の報酬値（ペナルティ）を末尾まで引き伸ばす
-            last_val = run_rewards[-1] if run_rewards else 0.0
-            extended = run_rewards + [last_val] * (max_steps - len(run_rewards))
-            padded_rewards.append(extended)
-        else:
-            padded_rewards.append(run_rewards)
-
-    rewards_array = np.array(padded_rewards)
-    
-    # 3. ステップごとの平均と標準偏差を計算
-    mean_rewards = np.mean(rewards_array, axis=0)
-    std_rewards = np.std(rewards_array, axis=0)
-    steps_range = range(max_steps)
-
-    # 4. 描画
-    plt.figure(figsize=(9, 5))
-    
-    # 標準偏差の幅を薄い赤で塗りつぶし
-    plt.fill_between(steps_range, 
-                     mean_rewards - std_rewards, 
-                     mean_rewards + std_rewards, 
-                     color='red', alpha=0.15, label='Reward Deviation')
-    
-    # 平均報酬を赤い実線で描画
-    plt.plot(steps_range, mean_rewards, color='red', linewidth=2.0, label=f'Mean Step Reward (n={len(file_list)})')
-    
-    plt.title("Step-by-Step Reward Analysis (Test Evaluation)")
-    plt.xlabel("Simulation Steps")
-    plt.ylabel("Instantaneous Reward")
-    plt.grid(True, linestyle=':', alpha=0.7)
-    plt.legend(loc='upper right')
-    plt.tight_layout()
-    
-    img_path = os.path.join(config.OUTPUT_DIR, output_filename)
-    plt.savefig(img_path)
-    plt.close()
-    print(f"★ステップ報酬の平均化グラフを保存しました: {img_path}")
-
 def main():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 
@@ -443,15 +362,20 @@ def main():
     # env = KalmanPredictionWrapper(env, horizon_steps=20)
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
 
+    # 実験6のノイズを抑えた
+    env = VelocityObservationWrapper(raw_env)
+    env = KalmanPredictionWrapper(env, horizon_steps=8)
+    env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
+
     # 【実験7】モンテカルロ法予測 ＋　人工ポテンシャルシールド（APF）
     # env = VelocityObservationWrapper(raw_env)
     # env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
 
     # 実験7のパラメータ変更
-    env = VelocityObservationWrapper(raw_env)
-    env = MonteCarloPredictionWrapper(env, horizon_steps=10, num_samples=30)
-    env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
+    # env = VelocityObservationWrapper(raw_env)
+    # env = MonteCarloPredictionWrapper(env, horizon_steps=10, num_samples=30)
+    # env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
     #------------------------------------------------
 
     # 環境envを利用して学習を実行する

@@ -4,14 +4,14 @@ OUTPUT_DIR = "outputs"
 
 # 5回連続実験する際の手法名　手法、パラメータごとに一意に設定する
 # 命名規則も整備すべき
-EXP_NAME = "V7_LOW_PARALLEL"
+EXP_NAME = "temp"
 
 # 5回連続実験したあと、平均を出したい手法名
-TARGET_NAME = "V7_LOW_PARALLEL"
-
+# TARGET_NAME = "V6_HIGH_NOISE"
+TARGET_NAME = "temp"
 
 # 学習する総エピソード数
-TOTAL_EPISODES = 500
+TOTAL_EPISODES = 1
 # 1エピソードの最大ステップ数
 MAX_STEPS_PER_EPISODE = 500
 
