@@ -384,7 +384,7 @@ def main():
     run_id = f"{config.EXP_NAME}_{now_time}"
 
     print(f"\n=========================================")
-    print(f" 🚀 実験開始: {config.EXP_NAME} (ID: {run_id})")
+    print(f" 実験開始: {config.EXP_NAME} (ID: {run_id})")
     print(f"=========================================\n")
 
     # 学習時のスコアの描画
