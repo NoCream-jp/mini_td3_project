@@ -399,7 +399,7 @@ class SafetyShieldWrapper(gym.Wrapper):
     def __init__(self, env, lookahead_steps=15, safety_margin=0.35):
         super().__init__(env)
         self.lookahead_steps = lookahead_steps
-        self.safety_margin = safety_margin # 判定半径(0.2) + 余裕(0.15)
+        self.safety_margin = safety_margin
         self.latest_preds = []
 
     def reset(self, seed=None, options=None):

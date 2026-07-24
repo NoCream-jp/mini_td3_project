@@ -8,6 +8,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.animation as animation
+import glob
 
 # 自作ファイルインポート
 import config
@@ -49,10 +50,11 @@ class EpisodeLoggerCallback(BaseCallback):
                 return False
         return True
 
+# 学習を進める
 def learn_td3(env):
     # ノイズ設定(ランダム性を持たせる設定)
     n_actions = env.action_space.shape[-1]
-    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.3 * np.ones(n_actions))
+    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=np.ones(n_actions) * 0.3)
     # モデル用意
     model = TD3("MlpPolicy", env, action_noise=action_noise, verbose=1)
     # コールバック用意
@@ -65,7 +67,7 @@ def learn_td3(env):
     model.save(os.path.join(config.OUTPUT_DIR, "simple_td3_model"))
     return model, callback.episode_rewards
 
-# テストエピソード(1周だけ)を回し、記録するために呼ばれる関数
+# 本番テストエピソード(1周だけ)を回し、記録するために呼ばれる関数
 def actual_test(now_time, model, env):
     num_jammers = env.unwrapped.num_jammers
     prediction_snapshots = []
@@ -76,15 +78,14 @@ def actual_test(now_time, model, env):
         header = ["step", "agent_x", "agent_y"]
         for i in range(num_jammers):
             header.extend([f"j{i}_x", f"j{i}_y"])
+        header.append("reward") # jammerの数にも動的に対応できるよう最後に報酬を付け足すようにする
         writer.writerow(header)
         
-        # 修正：無理な上書きをすべて廃止し、この1行だけで完璧に同期させて初期化する
         obs, info = env.reset(options={"start_pos": config.AGENT_START_POS})
         
         for i in range(config.MAX_STEPS_PER_EPISODE):
             action, _ = model.predict(obs, deterministic=True)
             
-            # 30ステップごとに、純粋な数値を複製してメモリに保存
             if i % 30 == 0 and 'jam_preds' in info:
                 agent_pos = (env.unwrapped.location[0], env.unwrapped.location[1])
                 prediction_snapshots.append({
@@ -93,19 +94,19 @@ def actual_test(now_time, model, env):
                     "preds": copy.deepcopy(info['jam_preds'])
                 })
             
-            # stepを進める
-            obs, _, finish_flag, over_step_flag, info = env.step(action)
+            # 既存のコードのままで、ここで reward を受け取っています
+            obs, reward, finish_flag, over_step_flag, info = env.step(action)
             
-            # obsからデータを抽出して行を作成
+            # 行データの最後にも reward を追加
             row_data = [i, obs[0], obs[1]]
             for j in range(num_jammers):
                 row_data.extend([obs[2 + j*2], obs[3 + j*2]])
+            row_data.append(reward)
             
             writer.writerow(row_data) 
             
-            # ここで激突（finish_flag）したら、即座にループを抜けてログ保存を終了する
             if finish_flag or over_step_flag:
-                print(f"★本番テスト：ステップ {i} で衝突判定、または終了条件を検知しました。")
+                print(f"本番テスト：ステップ {i} で衝突判定、または終了条件を検知しました。")
                 break
                 
     return prediction_snapshots
@@ -141,13 +142,13 @@ def draw_from_csv(now_time, prediction_snapshots=None):
         header = next(reader)
         if len(header) < 3:
             raise ValueError(f"Invalid CSV header in {csv_path}")
-        num_jammers = (len(header) - 3) // 2
+        num_jammers = (len(header) - 4) // 2
 
         for i in range(num_jammers):
             jammer_histories[i] = {'x': [], 'y': []}
 
         for row in reader:
-            if len(row) < 3 + num_jammers * 2:
+            if len(row) < 4 + num_jammers * 2:
                 continue
             x_history.append(float(row[1]))
             y_history.append(float(row[2]))
@@ -239,13 +240,13 @@ def create_animation_from_csv(now_time):
         header = next(reader)
         if len(header) < 3:
             raise ValueError(f"Invalid CSV header in {csv_path}")
-        num_jammers = (len(header) - 3) // 2
+        num_jammers = (len(header) - 4) // 2
 
         for i in range(num_jammers):
             jammer_histories[i] = {'x': [], 'y': []}
 
         for row in reader:
-            if len(row) < 3 + num_jammers * 2:
+            if len(row) < 4 + num_jammers * 2:
                 continue
             x_history.append(float(row[1]))
             y_history.append(float(row[2]))
@@ -329,7 +330,6 @@ def create_animation_from_csv(now_time):
     plt.close()
     print(f"動的軌跡のGIFアニメーションを保存しました: {gif_path}")
 
-
 def main():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 
@@ -362,10 +362,15 @@ def main():
     # env = KalmanPredictionWrapper(env, horizon_steps=20)
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
 
-    # 【実験7】モンテカルロ法予測 ＋　人工ポテンシャルシールド（APF）
+    # 実験6のノイズを抑えた
     env = VelocityObservationWrapper(raw_env)
-    env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
-    env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
+    env = KalmanPredictionWrapper(env, horizon_steps=8)
+    env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
+
+    # 【実験7】モンテカルロ法予測 ＋　人工ポテンシャルシールド（APF）
+    # env = VelocityObservationWrapper(raw_env)
+    # env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
+    # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
 
     # 実験7のパラメータ変更
     # env = VelocityObservationWrapper(raw_env)
@@ -376,18 +381,23 @@ def main():
     # 環境envを利用して学習を実行する
     model, rewards_history = learn_td3(env)
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
-    
+    run_id = f"{config.EXP_NAME}_{now_time}"
+
+    print(f"\n=========================================")
+    print(f" 実験開始: {config.EXP_NAME} (ID: {run_id})")
+    print(f"=========================================\n")
+
     # 学習時のスコアの描画
-    draw_score(now_time, rewards_history)
+    draw_score(run_id, rewards_history)
     
     # actual_test から予測リストを受け取る
-    pred_snapshots = actual_test(now_time, model, env)
+    pred_snapshots = actual_test(run_id, model, env)
     
     # 受け取ったリストをそのまま draw_from_csv に引き渡す
-    draw_from_csv(now_time, pred_snapshots)
+    draw_from_csv(run_id, pred_snapshots)
     
     # 同じCSVを読み込んでGIFアニメーションを出力する
-    create_animation_from_csv(now_time)
+    create_animation_from_csv(run_id)
 
 if __name__ == "__main__":
     main()

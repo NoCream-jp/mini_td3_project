@@ -1,0 +1,1409 @@
+================================
+main.py
+================================
+
+import datetime
+import os
+import csv
+import numpy as np
+import copy
+from stable_baselines3 import TD3
+from stable_baselines3.common.callbacks import BaseCallback
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import matplotlib.animation as animation
+import glob
+
+# 自作ファイルインポート
+import config
+from my_jammer_env import MyJammerEnv
+from my_wrappers import TrajectoryPredictionWrapper, SafetyShieldWrapper, VelocityObservationWrapper
+
+# ノイズインポート
+from stable_baselines3.common.noise import NormalActionNoise
+
+# ラッパーインポート
+from my_wrappers import (
+    TrajectoryPredictionWrapper, 
+    SafetyShieldWrapper, 
+    VelocityObservationWrapper,
+    KalmanPredictionWrapper,
+    PotentialFieldShieldWrapper,
+    MonteCarloPredictionWrapper
+)
+
+# コールバック関数ふくむクラス
+## データロガー
+class EpisodeLoggerCallback(BaseCallback):
+    def __init__(self, total_episodes: int, verbose=0):
+        super().__init__(verbose)
+        self.total_episodes = total_episodes
+        self.episode_count = 0
+        self.current_ep_reward = 0.0
+        self.episode_rewards = []
+
+    # 報酬を描画用にrewardsに保存
+    def _on_step(self) -> bool:
+        self.current_ep_reward += self.locals["rewards"][0]
+        done = self.locals["dones"][0]
+        if done:
+            self.episode_count += 1
+            self.episode_rewards.append(self.current_ep_reward)
+            self.current_ep_reward = 0.0 
+            if self.episode_count >= self.total_episodes:
+                return False
+        return True
+
+# 学習を進める
+def learn_td3(env):
+    # ノイズ設定(ランダム性を持たせる設定)
+    n_actions = env.action_space.shape[-1]
+    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=np.ones(n_actions) * 0.3)
+    # モデル用意
+    model = TD3("MlpPolicy", env, action_noise=action_noise, verbose=1)
+    # コールバック用意
+    callback = EpisodeLoggerCallback(total_episodes=config.TOTAL_EPISODES)
+    # タイムステップ上限設定
+    max_possible_timesteps = config.TOTAL_EPISODES * config.MAX_STEPS_PER_EPISODE
+    # learn打つ
+    model.learn(total_timesteps=max_possible_timesteps, callback=callback)
+    # save
+    model.save(os.path.join(config.OUTPUT_DIR, "simple_td3_model"))
+    return model, callback.episode_rewards
+
+# 本番テストエピソード(1周だけ)を回し、記録するために呼ばれる関数
+def actual_test(now_time, model, env):
+    num_jammers = env.unwrapped.num_jammers
+    prediction_snapshots = []
+    
+    with open(os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv"), "w", newline="") as file:
+        writer = csv.writer(file)
+        
+        header = ["step", "agent_x", "agent_y"]
+        for i in range(num_jammers):
+            header.extend([f"j{i}_x", f"j{i}_y"])
+        header.append("reward") # jammerの数にも動的に対応できるよう最後に報酬を付け足すようにする
+        writer.writerow(header)
+        
+        obs, info = env.reset(options={"start_pos": config.AGENT_START_POS})
+        
+        for i in range(config.MAX_STEPS_PER_EPISODE):
+            action, _ = model.predict(obs, deterministic=True)
+            
+            if i % 30 == 0 and 'jam_preds' in info:
+                agent_pos = (env.unwrapped.location[0], env.unwrapped.location[1])
+                prediction_snapshots.append({
+                    "step": i,
+                    "agent_pos": agent_pos,
+                    "preds": copy.deepcopy(info['jam_preds'])
+                })
+            
+            # 既存のコードのままで、ここで reward を受け取っています
+            obs, reward, finish_flag, over_step_flag, info = env.step(action)
+            
+            # 行データの最後にも reward を追加
+            row_data = [i, obs[0], obs[1]]
+            for j in range(num_jammers):
+                row_data.extend([obs[2 + j*2], obs[3 + j*2]])
+            row_data.append(reward)
+            
+            writer.writerow(row_data) 
+            
+            if finish_flag or over_step_flag:
+                print(f"本番テスト：ステップ {i} で衝突判定、または終了条件を検知しました。")
+                break
+                
+    return prediction_snapshots
+
+# 報酬可視化関数
+def draw_score(now_time, rewards):
+    plt.figure(figsize=(8, 5))
+    plt.plot(range(1, len(rewards) + 1), rewards, color='green', linewidth=1.5, label='Episode Reward')
+    plt.title(f"Learning Curve ({now_time})")
+    plt.xlabel("Episodes")
+    plt.ylabel("Cumulative Reward (Symlog Scale)")
+    plt.yscale('symlog', linthresh=100)
+    plt.ylim(-2500, 1500)
+    plt.axhline(0, color='black', linewidth=1.0, linestyle='--', zorder=1)
+
+    plt.grid(True, linestyle=':', alpha=0.7)
+    plt.legend()
+    
+    img_path = os.path.join(config.OUTPUT_DIR, f"score_{now_time}.png")
+    plt.savefig(img_path)
+    plt.close()
+    print(f"学習スコアの画像を保存しました: {img_path}")
+
+# 最後のテスト試行で生成したcsvから描画する関数
+def draw_from_csv(now_time, prediction_snapshots=None):
+    csv_path = os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv")
+
+    x_history, y_history = [], []
+    jammer_histories = {} 
+    
+    with open(csv_path, "r") as file:
+        reader = csv.reader(file)
+        header = next(reader)
+        if len(header) < 3:
+            raise ValueError(f"Invalid CSV header in {csv_path}")
+        num_jammers = (len(header) - 4) // 2
+
+        for i in range(num_jammers):
+            jammer_histories[i] = {'x': [], 'y': []}
+
+        for row in reader:
+            if len(row) < 4 + num_jammers * 2:
+                continue
+            x_history.append(float(row[1]))
+            y_history.append(float(row[2]))
+            for i in range(num_jammers):
+                jammer_histories[i]['x'].append(float(row[3 + i*2]))
+                jammer_histories[i]['y'].append(float(row[4 + i*2]))
+
+    if not x_history:
+        raise ValueError(f"No trajectory data in {csv_path}")
+
+    plt.figure(figsize=(8, 6))
+    plt.xlim(-2.0, 2.0)
+    plt.ylim(-2.0, 2.0)
+    plt.gca().set_aspect('equal')
+    gx, gy = config.GOAL_POS
+    plt.scatter(gx, gy, color='red', marker='*', s=200, label=f'Goal ({gx}, {gy})', zorder=5)
+
+    # ジャマーの描画
+    colors = ['orange', 'purple', 'cyan', 'brown', 'pink']
+    for i in range(num_jammers):
+        c = colors[i % len(colors)]
+        jx_hist = jammer_histories[i]['x']
+        jy_hist = jammer_histories[i]['y']
+        
+        plt.plot(jx_hist, jy_hist, color=c, linestyle='--', linewidth=2.0, label=f'Jammer {i+1} Traj')
+        last_jx, last_jy = jx_hist[-1], jy_hist[-1]
+        obstacle_circle = patches.Circle((last_jx, last_jy), radius=config.OBSTACLE_RADIUS, color='grey', alpha=0.5, zorder=3)
+        plt.gca().add_patch(obstacle_circle)
+
+    # エージェントの軌跡描画
+    plt.plot(x_history, y_history, color='blue', marker='.', linestyle='-', linewidth=1.5, label='Agent Trajectory', zorder=4)
+    plt.scatter(x_history[0], y_history[0], color='green', marker='o', s=100, label='Start', zorder=5)
+    
+    # 予測リストの描画
+    if prediction_snapshots:
+        for idx, shot in enumerate(prediction_snapshots):
+            a_pos = shot["agent_pos"]
+            all_jam_preds = shot["preds"]
+            
+            # ① 予測が行われた位置に小さな黒丸を打つ
+            trigger_label = "Prediction Trigger" if idx == 0 else ""
+            plt.scatter(a_pos[0], a_pos[1], color='black', marker='o', s=30, zorder=6, label=trigger_label)
+            
+            # モンテカルロ判定：ジャマー数より予測軌道の数が多い場合は透過度を下げる
+            is_monte_carlo = len(all_jam_preds) > num_jammers
+            alpha_val = 0.15 if is_monte_carlo else 0.9
+            lw_val = 1.0 if is_monte_carlo else 2.5
+            
+            # ② 予測軌道を描画
+            for jam_idx, pred_traj in enumerate(all_jam_preds):
+                # どのジャマーに対する予測かを計算して色を合わせる
+                # （モンテカルロでジャマー1機につき50本出るような構造に対応）
+                target_jammer_id = jam_idx % max(1, num_jammers)
+                c = colors[target_jammer_id % len(colors)]
+                
+                px = [pt[0] for pt in pred_traj]
+                py = [pt[1] for pt in pred_traj]
+                
+                pred_label = "Predicted Traj" if idx == 0 and jam_idx < num_jammers else ""
+                plt.plot(px, py, color=c, linestyle=':', alpha=alpha_val, linewidth=lw_val, zorder=4, label=pred_label)
+
+    plt.title(f"Dynamic Jammer Evasion ({now_time})")
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    # 凡例の重複を整理して外側に配置
+    handles, labels = plt.gca().get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    by_label = {k: v for k, v in by_label.items() if k} # 空のラベルを除去
+    plt.legend(by_label.values(), by_label.keys(), loc='upper left', bbox_to_anchor=(1.05, 1))
+    
+    plt.tight_layout()
+    
+    img_path = os.path.join(config.OUTPUT_DIR, f"trajectory_{now_time}.png")
+    plt.savefig(img_path) 
+    plt.close()
+    print(f"軌跡の画像を保存しました: {img_path}")
+
+# CSVデータから時系列のGIFアニメーションを生成する関数
+def create_animation_from_csv(now_time):
+    csv_path = os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv")
+
+    x_history, y_history = [], []
+    jammer_histories = {} 
+    
+    with open(csv_path, "r") as file:
+        reader = csv.reader(file)
+        header = next(reader)
+        if len(header) < 3:
+            raise ValueError(f"Invalid CSV header in {csv_path}")
+        num_jammers = (len(header) - 4) // 2
+
+        for i in range(num_jammers):
+            jammer_histories[i] = {'x': [], 'y': []}
+
+        for row in reader:
+            if len(row) < 4 + num_jammers * 2:
+                continue
+            x_history.append(float(row[1]))
+            y_history.append(float(row[2]))
+            for i in range(num_jammers):
+                jammer_histories[i]['x'].append(float(row[3 + i*2]))
+                jammer_histories[i]['y'].append(float(row[4 + i*2]))
+
+    if not x_history:
+        return
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.set_xlim(-2.0, 2.0)
+    ax.set_ylim(-2.0, 2.0)
+    ax.set_aspect('equal')
+    gx, gy = config.GOAL_POS
+    ax.scatter(gx, gy, color='red', marker='*', s=200, label='Goal', zorder=5)
+
+    # 動かすオブジェクトの初期化
+    agent_dot, = ax.plot([], [], 'bo', markersize=8, zorder=6, label='Agent')
+    agent_tail, = ax.plot([], [], 'b-', linewidth=1.5, alpha=0.4, zorder=3)
+
+    jammer_dots = []
+    jammer_tails = []
+    jammer_circles = []
+    colors = ['orange', 'purple', 'cyan', 'brown', 'pink']
+
+    for i in range(num_jammers):
+        c = colors[i % len(colors)]
+        jd, = ax.plot([], [], marker='o', color=c, markersize=8, zorder=5, label=f'Jammer {i+1}')
+        jt, = ax.plot([], [], color=c, linestyle='--', linewidth=1.5, alpha=0.4, zorder=3)
+        jc = patches.Circle((20, 20), radius=config.OBSTACLE_RADIUS, color='grey', alpha=0.4, zorder=2)
+        ax.add_patch(jc)
+        
+        jammer_dots.append(jd)
+        jammer_tails.append(jt)
+        jammer_circles.append(jc)
+
+    time_text = ax.text(0.05, 0.95, '', transform=ax.transAxes, fontsize=12, fontweight='bold')
+    ax.set_title(f"Dynamic Jammer Evasion Animation ({now_time})")
+    ax.grid(True, linestyle='--', alpha=0.7)
+    
+    # 凡例の設定
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys(), loc='upper left', bbox_to_anchor=(1.05, 1))
+    fig.tight_layout()
+
+    # 初期化関数
+    def init():
+        agent_dot.set_data([], [])
+        agent_tail.set_data([], [])
+        for i in range(num_jammers):
+            jammer_dots[i].set_data([], [])
+            jammer_tails[i].set_data([], [])
+            jammer_circles[i].center = (20, 20)
+        time_text.set_text('')
+        return [agent_dot, agent_tail, time_text] + jammer_dots + jammer_tails + jammer_circles
+
+    # コマごとの更新関数
+    def update(frame):
+        # エージェントの現在位置と軌跡
+        agent_dot.set_data([x_history[frame]], [y_history[frame]])
+        agent_tail.set_data(x_history[:frame+1], y_history[:frame+1])
+
+        # ジャマーの現在位置と軌跡とバリア円
+        for i in range(num_jammers):
+            jx = jammer_histories[i]['x'][frame]
+            jy = jammer_histories[i]['y'][frame]
+            jammer_dots[i].set_data([jx], [jy])
+            jammer_tails[i].set_data(jammer_histories[i]['x'][:frame+1], jammer_histories[i]['y'][:frame+1])
+            jammer_circles[i].center = (jx, jy)
+
+        time_text.set_text(f'Step: {frame}')
+        return [agent_dot, agent_tail, time_text] + jammer_dots + jammer_tails + jammer_circles
+
+    # アニメーション作成 (interval=50 はコマの切り替え速度: 50ミリ秒)
+    ani = animation.FuncAnimation(fig, update, frames=len(x_history), init_func=init, blit=True, interval=50)
+
+    gif_path = os.path.join(config.OUTPUT_DIR, f"animation_{now_time}.gif")
+    ani.save(gif_path, writer='pillow')
+    plt.close()
+    print(f"動的軌跡のGIFアニメーションを保存しました: {gif_path}")
+
+def main():
+    os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+
+    #---------------wrapper装備----------------------
+    # 0. まず生の環境を作成
+    raw_env = MyJammerEnv()
+
+    # 【実験1】純粋な強化学習（座標のみ）
+    # env = raw_env
+
+    # 【実験2】強化学習 ＋ 直線予測　＋　シールド
+    # env = TrajectoryPredictionWrapper(raw_env, history_length=2, horizon_steps=20)
+    # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
+
+    # 【実験3】強化学習 ＋ 速度ベクトル入力
+    # env = VelocityObservationWrapper(raw_env)
+
+    # 【実験4】ハイブリッド（速度入力 ＋ CV予測シールド）
+    # env = VelocityObservationWrapper(raw_env)
+    # env = TrajectoryPredictionWrapper(env, history_length=2, horizon_steps=20)
+    # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
+
+    # 【実験5】最新ハイブリッド（速度入力 ＋ カルマンフィルタ予測シールド）
+    # env = VelocityObservationWrapper(raw_env)
+    # env = KalmanPredictionWrapper(env, horizon_steps=20)
+    # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
+
+    # 【実験6】カルマン予測 ＋ 人工ポテンシャル法シールド（APF）
+    # env = VelocityObservationWrapper(raw_env)
+    # env = KalmanPredictionWrapper(env, horizon_steps=20)
+    # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
+
+    # 実験6のノイズを抑えた
+    env = VelocityObservationWrapper(raw_env)
+    env = KalmanPredictionWrapper(env, horizon_steps=8)
+    env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
+
+    # 【実験7】モンテカルロ法予測 ＋　人工ポテンシャルシールド（APF）
+    # env = VelocityObservationWrapper(raw_env)
+    # env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
+    # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
+
+    # 実験7のパラメータ変更
+    # env = VelocityObservationWrapper(raw_env)
+    # env = MonteCarloPredictionWrapper(env, horizon_steps=10, num_samples=30)
+    # env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
+    #------------------------------------------------
+
+    # 環境envを利用して学習を実行する
+    model, rewards_history = learn_td3(env)
+    now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+    run_id = f"{config.EXP_NAME}_{now_time}"
+
+    print(f"\n=========================================")
+    print(f" 🚀 実験開始: {config.EXP_NAME} (ID: {run_id})")
+    print(f"=========================================\n")
+
+    # 学習時のスコアの描画
+    draw_score(run_id, rewards_history)
+    
+    # actual_test から予測リストを受け取る
+    pred_snapshots = actual_test(run_id, model, env)
+    
+    # 受け取ったリストをそのまま draw_from_csv に引き渡す
+    draw_from_csv(run_id, pred_snapshots)
+    
+    # 同じCSVを読み込んでGIFアニメーションを出力する
+    create_animation_from_csv(run_id)
+
+if __name__ == "__main__":
+    main()
+
+
+
+================================
+my_jammer_env.py
+================================
+import math
+import gymnasium as gym
+import numpy as np
+from gymnasium import spaces
+
+import config
+
+import math
+import numpy as np
+
+class JammerState:
+    def __init__(self, config_dict):
+        self.type = config_dict.get("type", "circle")
+        self.speed = config_dict.get("speed", 0.05)
+        
+        # ==========================================
+        # ① 直線運動 (linear_cross) の初期化
+        # ==========================================
+        if self.type == "linear_cross":
+            self.start_pos = np.array(config_dict.get("start_pos", [2.0, -2.0]), dtype=np.float32)
+            self.end_pos = np.array(config_dict.get("end_pos", [-2.0, 2.0]), dtype=np.float32)
+            
+            direction = self.end_pos - self.start_pos
+            self.total_dist = np.linalg.norm(direction) + 1e-6
+            
+            self.progress = 0.0
+            self.forward = True
+
+        # ==========================================
+        # ② サイン波 (sin_wave) の初期化
+        # ==========================================
+        elif self.type == "sin_wave":
+            self.start_pos = np.array(config_dict.get("start_pos", [2.0, -2.0]), dtype=np.float32)
+            self.end_pos = np.array(config_dict.get("end_pos", [-2.0, 2.0]), dtype=np.float32)
+            self.amplitude = config_dict.get("amplitude", 0.5)
+            self.frequency = config_dict.get("frequency", 2.0)
+            
+            direction = self.end_pos - self.start_pos
+            self.total_dist = np.linalg.norm(direction) + 1e-6
+            
+            # 波を横に揺らすための「垂直ベクトル」を計算しておく
+            dir_unit = direction / self.total_dist
+            self.perpendicular_unit = np.array([-dir_unit[1], dir_unit[0]], dtype=np.float32)
+            
+            self.progress = 0.0
+            self.forward = True
+
+        # ==========================================
+        # ③ 円・8の字 (circle / figure8) の初期化
+        # ==========================================
+        elif self.type in ["circle", "figure8"]:
+            self.cx = config_dict.get("center", [0.0, 0.0])[0]
+            self.cy = config_dict.get("center", [0.0, 0.0])[1]
+            self.size = config_dict.get("size", 1.0)
+            # 円運動用の角度（ラジアン）
+            self.t = math.radians(config_dict.get("angle", 0.0))
+
+        self.x = 0.0
+        self.y = 0.0
+        self.update_position()
+        
+    def update(self):
+        """毎ステップ、各軌道に合わせた「時間・進捗」を進める"""
+        # 直線とサイン波は「進捗率 (0.0 〜 1.0)」を往復させる
+        if self.type in ["linear_cross", "sin_wave"]:
+            step_progress = self.speed / self.total_dist
+            
+            if self.forward:
+                self.progress += step_progress
+                if self.progress >= 1.0:
+                    self.progress = 1.0
+                    self.forward = False
+            else:
+                self.progress -= step_progress
+                if self.progress <= 0.0:
+                    self.progress = 0.0
+                    self.forward = True
+                    
+        # 円・8の字はシンプルに「角度(t)」を回し続ける
+        elif self.type in ["circle", "figure8"]:
+            self.t += self.speed
+            
+        self.update_position()
+
+    def update_position(self):
+        """進んだ「時間・進捗」を元に、実際の X, Y 座標を計算する"""
+        if self.type == "linear_cross":
+            # 始点と終点の間を、progressの割合で直線補間
+            pos = self.start_pos + (self.end_pos - self.start_pos) * self.progress
+            self.x, self.y = pos[0], pos[1]
+        
+        elif self.type == "sin_wave":
+            # 1. まず直線の基準位置を出す
+            base_pos = self.start_pos + (self.end_pos - self.start_pos) * self.progress
+            # 2. サイン波のうねり（垂直方向のズレ）を計算
+            wave_offset = self.amplitude * math.sin(self.progress * math.pi * self.frequency)
+            # 3. 基準位置にズレを足し合わせる
+            pos = base_pos + self.perpendicular_unit * wave_offset
+            self.x, self.y = pos[0], pos[1]
+        
+        elif self.type == "circle":
+            # 三角関数で円を描く
+            self.x = self.cx + self.size * math.cos(self.t)
+            self.y = self.cy + self.size * math.sin(self.t)
+            
+        elif self.type == "figure8":
+            # Y軸の周波数を2倍にすることで8の字（リサージュ図形）を描く
+            self.x = self.cx + self.size * math.sin(self.t)
+            self.y = self.cy + self.size * math.sin(2.0 * self.t)
+            
+        # 画面外に出ないようにクリップ（全軌道共通）
+        self.x = np.clip(self.x, -2.0, 2.0)
+        self.y = np.clip(self.y, -2.0, 2.0)
+
+class MyJammerEnv(gym.Env):
+    def __init__(self):
+        super().__init__()
+        self.num_jammers = len(config.JAMMER_CONFIGS)
+        
+        obs_dim = 2 + (self.num_jammers * 2)
+        self.observation_space = spaces.Box(low=-2.0, high=2.0, shape=(obs_dim,), dtype=np.float32)
+        self.action_space = spaces.Box(low=-0.1, high=0.1, shape=(2,), dtype=np.float32)
+        
+        self.location = np.zeros(2, dtype=np.float32)
+        self.jammers = []
+
+        self.steps_limit_with_learning = config.MAX_STEPS_PER_EPISODE
+        # ステップ数
+        self.current_step = 0
+        self.obstacle_radius = config.OBSTACLE_RADIUS
+        self.goal_tol_m = config.GOAL_TOLERANCE
+        
+        # ゴール座標をconfigからNumpy配列として保持しておく
+        self.goal_pos = np.array(config.GOAL_POS, dtype=np.float32)
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self.current_step = 0
+
+        self.jammers = []
+        for j_conf in config.JAMMER_CONFIGS:
+            jam = JammerState(j_conf)
+            self.jammers.append(jam)
+
+        # options にスタート位置の指定があればそれを使う、無ければランダムにする
+        if options is not None and "start_pos" in options:
+            self.location = np.array(options["start_pos"], dtype=np.float32)
+        else:
+            max_spawn_attempts = 10_000
+            for _ in range(max_spawn_attempts):
+                self.location = self.np_random.uniform(low=-2.0, high=2.0, size=(2,)).astype(np.float32)
+                collision = False
+                for jam in self.jammers:
+                    dist = np.linalg.norm(self.location - np.array([jam.x, jam.y]))
+                    if dist <= self.obstacle_radius:
+                        collision = True
+                        break
+                if not collision:
+                    break
+            else:
+                raise RuntimeError("Could not sample a start position...")
+
+        return self._get_obs(), {}
+    def step(self, action):
+        self.current_step += 1
+        
+        for jam in self.jammers:
+            jam.update()
+        
+        next_location = self.location + action
+        clipped_location = np.clip(next_location, -2.0, 2.0)
+        hit_wall = not np.array_equal(next_location, clipped_location)
+        self.location = clipped_location 
+
+        # goalへの距離
+        dist_to_goal = np.linalg.norm(self.location - self.goal_pos)
+
+        min_dist_to_obstacle = float('inf')
+        for jam in self.jammers:
+            dist = np.linalg.norm(self.location - np.array([jam.x, jam.y]))
+            if dist < min_dist_to_obstacle:
+                min_dist_to_obstacle = dist
+
+        finish_flag = False
+        over_step_flag = self.steps_limit_with_learning <= self.current_step
+
+        if min_dist_to_obstacle <= self.obstacle_radius:
+            reward = config.OBSTACLE_REWARD
+            finish_flag = True
+        elif dist_to_goal <= self.goal_tol_m:
+            reward = config.GOAL_REWARD
+            finish_flag = True
+        else:
+            reward = -float(dist_to_goal)
+            if hit_wall:
+                reward += config.WALL_PENALTY
+
+        return self._get_obs(), reward, finish_flag, over_step_flag, {}
+
+    def _get_obs(self):
+        obs_list = [self.location[0], self.location[1]]
+        for jam in self.jammers:
+            obs_list.extend([jam.x, jam.y])
+        return np.array(obs_list, dtype=np.float32)
+
+
+
+============================
+my_wrappers.py
+============================
+import math
+import gymnasium as gym
+import numpy as np
+from collections import deque
+from typing import cast
+
+import config
+from my_jammer_env import MyJammerEnv
+
+import gymnasium as gym
+import numpy as np
+from gymnasium import spaces
+
+# =====================================================================
+# 1. 速度ベクトルを渡す学習ラッパー
+# =====================================================================
+class VelocityObservationWrapper(gym.Wrapper):
+    """
+    環境から出力される観測(obs)に、「各ジャマーとの相対速度ベクトル」を追加して
+    AIのニューラルネットワークに渡すための視覚拡張ラッパー。
+    """
+    def __init__(self, env):
+        super().__init__(env)
+        
+        raw_env = self.env.unwrapped
+        self.num_jammers = len(config.JAMMER_CONFIGS)
+        
+        old_dim = 2 + (self.num_jammers * 2)
+        new_dim = old_dim + (self.num_jammers * 2)
+        
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(new_dim,), dtype=np.float32
+        )
+        
+        # None を使わず、最初から安全なゼロ配列（ダミー）を入れておく
+        self.prev_ego_pos = np.zeros(2, dtype=np.float32)
+        self.prev_jam_positions = [np.zeros(2, dtype=np.float32) for _ in range(self.num_jammers)]
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        
+        # --- 初期位置の記録 ---
+        self.prev_ego_pos = obs[0:2]  # 0,1番目はエージェント
+        self.prev_jam_positions = []
+        
+        for i in range(self.num_jammers):
+            # ジャマーのx, yは2番目以降に2つずつ格納されている
+            jx_jy = obs[2 + i*2 : 4 + i*2]
+            self.prev_jam_positions.append(jx_jy)
+            
+        # リセット直後はまだ動いていないため、相対速度はすべて 0.0
+        rel_vs = np.zeros(self.num_jammers * 2, dtype=np.float32)
+        
+        # 元の観測配列の後ろに、相対速度の配列を連結（くっつける）
+        new_obs = np.concatenate([obs, rel_vs], dtype=np.float32)
+        
+        return new_obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # --- 1. エージェントの速度計算 ---
+        current_ego_pos = obs[0:2]
+        ego_v = current_ego_pos - self.prev_ego_pos
+        
+        rel_vs = []
+        current_jam_positions = []
+        
+        # --- 2. 各ジャマーの相対速度計算 ---
+        for i in range(self.num_jammers):
+            # 現在のジャマー位置を取得
+            jam_pos = obs[2 + i*2 : 4 + i*2]
+            
+            # ジャマーの絶対速度
+            jam_v = jam_pos - self.prev_jam_positions[i]
+            
+            # 相対速度 = 相手の速度 - 自分の速度
+            rel_v = jam_v - ego_v
+            rel_vs.extend(rel_v)
+            
+            # 次のステップのために現在の位置を保存リストへ
+            current_jam_positions.append(jam_pos)
+            
+        # --- 3. 過去の記録を更新 ---
+        self.prev_ego_pos = current_ego_pos
+        self.prev_jam_positions = current_jam_positions
+        
+        # --- 4. 新しい観測配列の作成 ---
+        rel_vs_array = np.array(rel_vs, dtype=np.float32)
+        new_obs = np.concatenate([obs, rel_vs_array], dtype=np.float32)
+        
+        return new_obs, reward, terminated, truncated, info
+
+
+# =====================================================================
+# 2. 単純な軌道予測ラッパー (The Oracle)
+# =====================================================================
+class TrajectoryPredictionWrapper(gym.Wrapper):
+    """
+    直近数ステップの座標履歴から「平均差分ベクトル（等速直線）」を計算し、
+    未来の予測軌跡を info['jam_preds'] に格納するラッパー。
+    """
+    def __init__(self, env, history_length=5, horizon_steps=20):
+        super().__init__(env)
+        self.history_length = max(2, history_length)
+        self.horizon_steps = horizon_steps
+        
+        raw_env = cast(MyJammerEnv, self.env.unwrapped)
+        self.num_jammers = raw_env.num_jammers
+        self.jammer_histories = [deque(maxlen=self.history_length) for _ in range(self.num_jammers)]
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        
+        self.jammer_histories = [deque(maxlen=self.history_length) for _ in range(self.num_jammers)]
+        raw_env = cast(MyJammerEnv, self.env.unwrapped)
+        
+        for i, jam in enumerate(raw_env.jammers):
+            self.jammer_histories[i].append(np.array([jam.x, jam.y], dtype=np.float32))
+            
+        info['jam_preds'] = self._predict_trajectories()
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        raw_env = cast(MyJammerEnv, self.env.unwrapped)
+        
+        for i, jam in enumerate(raw_env.jammers):
+            self.jammer_histories[i].append(np.array([jam.x, jam.y], dtype=np.float32))
+            
+        info['jam_preds'] = self._predict_trajectories()
+        return obs, reward, terminated, truncated, info
+
+    def _predict_trajectories(self):
+        all_preds = []
+        
+        for hist in self.jammer_histories:
+            pred_traj = []
+            current_pos = hist[-1]
+            sim_x, sim_y = current_pos[0], current_pos[1]
+            
+            if len(hist) >= 2:
+                oldest_pos = hist[0]
+                dx = (current_pos[0] - oldest_pos[0]) / (len(hist) - 1)
+                dy = (current_pos[1] - oldest_pos[1]) / (len(hist) - 1)
+            else:
+                # 特定の軌道に依存せず、開始直後（履歴不足時）は「停止」として扱う
+                # これにより、どんなジャマーを設定してもエラーやズレが起きなくなります
+                dx, dy = 0.0, 0.0
+                
+            sim_dx, sim_dy = dx, dy
+            
+            for _ in range(self.horizon_steps):
+                next_x = sim_x + sim_dx
+                next_y = sim_y + sim_dy
+                
+                if next_x < -2.0 or next_x > 2.0:
+                    sim_dx = -sim_dx
+                    next_x = np.clip(next_x, -2.0, 2.0)
+                if next_y < -2.0 or next_y > 2.0:
+                    sim_dy = -sim_dy
+                    next_y = np.clip(next_y, -2.0, 2.0)
+                    
+                sim_x, sim_y = next_x, next_y
+                pred_traj.append((sim_x, sim_y))
+                
+            all_preds.append(pred_traj)
+            
+        return all_preds
+
+
+# =====================================================================
+# 3. カルマンフィルタ定義、それを利用する予測ラッパー
+# =====================================================================
+class KalmanFilter2D:
+    """2次元の等速直線運動（CVモデル）用カルマンフィルタ"""
+    def __init__(self, dt=1.0, std_acc=0.03, std_meas=0.001):
+        self.dt = dt
+        # 状態ベクトル: [x, y, vx, vy]^T
+        self.x = np.zeros(4, dtype=np.float32)
+        
+        # 状態遷移行列 F (未来を予測する物理法則: 等速直線)
+        self.F = np.array([
+            [1, 0, dt, 0],
+            [0, 1, 0, dt],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ], dtype=np.float32)
+        
+        # 観測行列 H (センサーから見えるもの＝位置 x, y のみ)
+        self.H = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ], dtype=np.float32)
+        
+        # 誤差共分散行列 P (現在の推定に対する「自信のなさ」)
+        self.P = np.eye(4, dtype=np.float32) * 1.0
+        
+        # 観測ノイズ共分散 R (センサーのブレ具合)
+        self.R = np.eye(2, dtype=np.float32) * (std_meas**2)
+        
+        # プロセスノイズ共分散 Q (想定外の動き・加速度のブレ具合)
+        # サイン波のような「直線から外れる動き」を許容するための重要なパラメータ
+        self.Q = np.eye(4, dtype=np.float32) * (std_acc**2)
+        
+    def predict(self):
+        """事前推定：現在の速度のまま進んだらどこにいるか"""
+        self.x = np.dot(self.F, self.x)
+        self.P = np.dot(np.dot(self.F, self.P), self.F.T) + self.Q
+        
+    def update(self, z):
+        """事後推定：実際の観測データ(z)を使って予測を修正する"""
+        y = z - np.dot(self.H, self.x) # 予測と実際のズレ（イノベーション）
+        S = np.dot(np.dot(self.H, self.P), self.H.T) + self.R
+        K = np.dot(np.dot(self.P, self.H.T), np.linalg.inv(S)) # カルマンゲイン
+        
+        self.x = self.x + np.dot(K, y)
+        I = np.eye(self.P.shape[0])
+        self.P = np.dot(I - np.dot(K, self.H), self.P)
+
+import gymnasium as gym
+
+class KalmanPredictionWrapper(gym.Wrapper):
+    """
+    カルマンフィルタを用いてジャマーの未来軌道を予測するラッパー。
+    以前の TrajectoryPredictionWrapper の完全上位互換です。
+    """
+    def __init__(self, env, horizon_steps=20):
+        super().__init__(env)
+        self.horizon_steps = horizon_steps
+        
+        raw_env = self.env.unwrapped
+        raw_env = cast(MyJammerEnv, self.env.unwrapped)
+        self.num_jammers = raw_env.num_jammers
+        self.kfs = []
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        
+        self.kfs = []
+        for i in range(self.num_jammers):
+            # カルマンフィルタを初期化
+            kf = KalmanFilter2D(dt=1.0, std_acc=0.03, std_meas=0.001)
+            
+            jx = obs[2 + i*2]
+            jy = obs[3 + i*2]
+            
+            # 初期位置をセット、初期速度は0のままスタート
+            kf.x[0] = jx
+            kf.x[1] = jy
+            self.kfs.append(kf)
+            
+        info['jam_preds'] = self._predict_trajectories()
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # 各ジャマーのカルマンフィルタを更新
+        for i in range(self.num_jammers):
+            jx = obs[2 + i*2]
+            jy = obs[3 + i*2]
+            z = np.array([jx, jy], dtype=np.float32)
+            
+            # 1. 前回の状態から今の位置を「予測」
+            self.kfs[i].predict()
+            
+            # 2. 実際の今の位置(z)を使って、内部の速度ベクトルを「修正」
+            self.kfs[i].update(z)
+            
+        # 修正された最新の速度ベクトルを使って未来軌道を生成
+        info['jam_preds'] = self._predict_trajectories()
+        return obs, reward, terminated, truncated, info
+
+    def _predict_trajectories(self):
+        all_preds = []
+        for kf in self.kfs:
+            pred_traj = []
+            
+            # 未来をシミュレーションするために、現在の状態(x, y, vx, vy)をコピー
+            sim_x = np.copy(kf.x)
+            
+            for _ in range(self.horizon_steps):
+                # 状態遷移行列 F を掛けて、1歩未来へ進める
+                sim_x = np.dot(kf.F, sim_x)
+                
+                # 世界の果て（壁）での反射ロジック
+                if sim_x[0] < -2.0 or sim_x[0] > 2.0:
+                    sim_x[2] = -sim_x[2] # X方向の速度ベクトルを反転
+                    sim_x[0] = np.clip(sim_x[0], -2.0, 2.0)
+                if sim_x[1] < -2.0 or sim_x[1] > 2.0:
+                    sim_x[3] = -sim_x[3] # Y方向の速度ベクトルを反転
+                    sim_x[1] = np.clip(sim_x[1], -2.0, 2.0)
+                    
+                pred_traj.append((sim_x[0], sim_x[1]))
+                
+            all_preds.append(pred_traj)
+            
+        return all_preds
+
+# =====================================================================
+# 4. モンテカルロ法を利用した予測ラッパー 
+# =====================================================================
+class MonteCarloPredictionWrapper(gym.Wrapper):
+    """
+    モンテカルロ法でジャマーの未来軌道を予測するラッパー。
+    各ジャマーについて複数サンプルの軌道を生成し、その平均を予測とする。
+    horizon_steps: 予測歩数、
+    num_samples: 予測確率分布の密度、予測の本数
+    noise_std: ノイズの標準偏差（大きくなるほどノイズが増える）
+    """
+
+    def __init__(self, env, horizon_steps=20, num_samples=30, noise_std=0.05):
+        super().__init__(env)
+        self.horizon_steps = horizon_steps
+        self.num_samples = num_samples
+        self.noise_std = noise_std
+
+        raw_env = cast(MyJammerEnv, self.env.unwrapped)
+        self.num_jammers = raw_env.num_jammers
+
+        # 前ステップ位置（速度推定用）
+        self.prev_positions = [np.zeros(2, dtype=np.float32) for _ in range(self.num_jammers)]
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+
+        self.prev_positions = []
+        for i in range(self.num_jammers):
+            pos = obs[2 + i*2 : 4 + i*2]
+            self.prev_positions.append(pos)
+
+        info['jam_preds'] = self._predict(obs)
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        info['jam_preds'] = self._predict(obs)
+
+        # 更新
+        for i in range(self.num_jammers):
+            self.prev_positions[i] = obs[2 + i*2 : 4 + i*2]
+
+        return obs, reward, terminated, truncated, info
+
+    def _predict(self, obs):
+        all_preds = []
+
+        for i in range(self.num_jammers):
+            current_pos = obs[2 + i*2 : 4 + i*2]
+            prev_pos = self.prev_positions[i]
+
+            # 速度推定（単純差分）
+            velocity = current_pos - prev_pos
+
+            samples = []
+
+            for _ in range(self.num_samples):
+                traj = []
+                sim_pos = np.copy(current_pos)
+                sim_vel = np.copy(velocity)
+
+                for _ in range(self.horizon_steps):
+                    # ランダムノイズ追加（ここがモンテカルロ）
+                    noise = np.random.normal(0, self.noise_std, size=2)
+                    sim_vel = sim_vel + noise
+
+                    sim_pos = sim_pos + sim_vel
+
+                    # 壁反射
+                    for d in range(2):
+                        if sim_pos[d] < -2.0 or sim_pos[d] > 2.0:
+                            sim_vel[d] = -sim_vel[d]
+                            sim_pos[d] = np.clip(sim_pos[d], -2.0, 2.0)
+
+                    traj.append(sim_pos.copy())
+
+                samples.append(traj)
+
+            # サンプル平均を取る
+            mean_traj = []
+            for t in range(self.horizon_steps):
+                mean_pos = np.mean([samples[s][t] for s in range(self.num_samples)], axis=0)
+                mean_traj.append((mean_pos[0], mean_pos[1]))
+
+            all_preds.append(mean_traj)
+
+        return all_preds
+
+# =====================================================================
+# 5. 30度ずつ回転を試す、回避ラッパー (The Shield)
+# =====================================================================
+class SafetyShieldWrapper(gym.Wrapper):
+    """
+    軌道予測データ(jam_preds)を読み取り、AIが提案した行動(action)を続けた場合に
+    未来で衝突しそうなら、行動を安全な方向に強制的に書き換えるラッパー。
+    """
+    def __init__(self, env, lookahead_steps=15, safety_margin=0.35):
+        super().__init__(env)
+        self.lookahead_steps = lookahead_steps
+        self.safety_margin = safety_margin # 判定半径(0.2) + 余裕(0.15)
+        self.latest_preds = []
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        # 環境が初期化された時の予測データを取得
+        self.latest_preds = info.get('jam_preds', [])
+        return obs, info
+
+    def step(self, action):
+        # 1. 提案された行動が安全かチェックし、危険なら別の行動に書き換える（リランク）
+        safe_action = self._rerank_action(action)
+        
+        # 2. 「書き換えた安全な行動」で環境を1ステップ進める
+        obs, reward, terminated, truncated, info = self.env.step(safe_action)
+        
+        # 3. 次のステップの判断のために、最新の予測データを更新
+        self.latest_preds = info.get('jam_preds', [])
+        
+        # 4. もしシールドが発動（行動が書き換えられた）場合、AIにペナルティを与える
+        if not np.array_equal(action, safe_action):
+            # reward = float(reward) - 5.0 # 「助けてもらうような危険な行動をするな」という教育的指導を消去。比較のため。
+            info['shield_activated'] = True
+        else:
+            info['shield_activated'] = False
+            
+        return obs, reward, terminated, truncated, info
+
+    def _rerank_action(self, action):
+        """行動候補の中から、最も安全で、かつ元の意図に近いものを選ぶ"""
+        if not self.latest_preds:
+            return action # 予測データが無ければ何もしない
+            
+        raw_env = cast(MyJammerEnv, self.env.unwrapped)
+        current_pos = raw_env.location
+        
+        # ① まず、AIの本来の行動がそのまま安全かチェック
+        if self._is_safe(current_pos, action):
+            return action
+            
+        # ② 危険な場合、少し角度をずらした「回避行動候補」を生成
+        candidates = self._generate_candidates(action)
+        
+        # ③ 候補の中で、安全なものが見つかればそれを採用（少しだけ迂回する）
+        for cand in candidates:
+            if self._is_safe(current_pos, cand):
+                return cand
+                
+        # ④ どの方向に逃げてもぶつかる絶体絶命の場合、とりあえずブレーキ（急停止）
+        return np.zeros(2, dtype=np.float32)
+
+    def _is_safe(self, current_pos, action):
+        """指定した行動で進み続けた場合、未来で衝突しないかを判定する"""
+        # 予測されている未来の歩数と、見たい歩数の短い方に合わせる
+        steps = min(self.lookahead_steps, len(self.latest_preds[0]))
+        
+        for k in range(steps):
+            # AIがこの行動を続けた場合の k 歩先の未来位置
+            agent_future = current_pos + action * (k + 1)
+            agent_future = np.clip(agent_future, -2.0, 2.0)
+            
+            # 各ジャマーの k 歩先の未来位置と比較
+            for jam_pred in self.latest_preds:
+                jam_future = np.array(jam_pred[k])
+                dist = np.linalg.norm(agent_future - jam_future)
+                
+                # 1歩でもセーフティマージンを割り込む未来があれば「危険(False)」
+                if dist < self.safety_margin:
+                    return False
+                    
+        return True # すべての未来で距離が保たれていれば「安全(True)」
+
+    def _generate_candidates(self, action):
+        """元の行動ベクトルを左右に少しずつ回転させた回避候補リストを作る"""
+        candidates = []
+        action_norm = np.linalg.norm(action)
+        if action_norm < 1e-5:
+            return candidates # そもそも止まっているなら候補は出さない
+            
+        # 左右に30度、60度、90度、120度ずらしたベクトルを生成
+        angles = [math.radians(deg) for deg in [30, -30, 60, -60, 90, -90, 120, -120]]
+        
+        for angle in angles:
+            cos_a = math.cos(angle)
+            sin_a = math.sin(angle)
+            # 2次元ベクトルの回転行列
+            rot_x = action[0]*cos_a - action[1]*sin_a
+            rot_y = action[0]*sin_a + action[1]*cos_a
+            candidates.append(np.array([rot_x, rot_y], dtype=np.float32))
+            
+        return candidates
+
+# =====================================================================
+# 6. 人工ポテンシャル法で滑らかに離れる回避ラッパー
+# =====================================================================
+class PotentialFieldShieldWrapper(gym.Wrapper):
+    """
+    人工ポテンシャル法（APF）を用いた安全シールド。
+    AIの行動を「引力」、予測されるジャマーからの危険度を「斥力」とし、
+    それらの合力ベクトルを計算して滑らかに回避する。
+    latest_preds：jammerの未来のデータ
+    """
+    def __init__(self, env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05):
+        super().__init__(env)
+        self.lookahead_steps = lookahead_steps
+        self.safety_margin = safety_margin
+        
+        # 斥力の強さを決めるパラメータ（大きいほど強く弾かれる）
+        self.k_rep = k_rep 
+        
+        self.latest_preds = []
+
+    def reset(self, seed=None, options=None):
+        # envのresetの戻り値の配列のほうを、latest_predsに格納しておく
+        obs, info = self.env.reset(seed=seed, options=options)
+        self.latest_preds = info.get('jam_preds', [])
+        return obs, info
+
+    def step(self, action):
+        # 1. ポテンシャル法による合力（安全な行動ベクトル）の計算
+        safe_action = self._calculate_apf_action(action)
+        
+        # 2. 環境を進める
+        obs, reward, terminated, truncated, info = self.env.step(safe_action)
+        self.latest_preds = info.get('jam_preds', [])
+        
+        # 3. シールド介入判定
+        if not np.allclose(action, safe_action, atol=1e-5):
+            info['shield_activated'] = True
+        else:
+            info['shield_activated'] = False
+            
+        return obs, reward, terminated, truncated, info
+
+    def _calculate_apf_action(self, action):
+        if not self.latest_preds:
+            return action
+            
+        # MyJammerEnv型にキャストしないとエラーが出る
+        raw_env = cast(MyJammerEnv, self.env.unwrapped)
+        current_pos = raw_env.location
+        
+        # 引力ベクトル：AIが本来行きたい方向（TD3の出力）
+        F_att = action 
+        # 斥力ベクトルの初期化
+        F_rep = np.zeros(2, dtype=np.float32)
+        
+        is_danger = False
+        action_norm = np.linalg.norm(action)
+        
+        if action_norm < 1e-6:
+            return action # 止まっているなら何もしない
+            
+        steps = min(self.lookahead_steps, len(self.latest_preds[0]))
+        
+        # 影響圏（この距離以内に入ったら斥力が発生し始める）
+        influence_radius = self.safety_margin + 0.2
+        
+        for k in range(steps):
+            # AIがそのまま進んだ場合の未来位置
+            agent_future = current_pos + action * (k + 1)
+            
+            for jam_pred in self.latest_preds:
+                jam_future = np.array(jam_pred[k])
+                dist = np.linalg.norm(agent_future - jam_future)
+                
+                # もし影響圏内に入る未来があれば、斥力を計算して足し合わせる
+                if dist < influence_radius:
+                    is_danger = True
+                    # ジャマーからエージェントへ向かう方向ベクトル
+                    diff = agent_future - jam_future
+                    dir_vector = diff / (dist + 1e-6)
+                    
+                    # 距離が近いほど指数関数的に強くなる斥力の大きさ
+                    magnitude = self.k_rep * ((1.0 / (dist + 1e-6)) - (1.0 / influence_radius))
+                    F_rep += dir_vector * magnitude
+
+        # 危険が全く予測されなかった場合は、本来のAIの行動をそのまま通す
+        if not is_danger:
+            return action
+
+        # 【ポテンシャル場の合力計算】
+        F_total = F_att + F_rep
+        total_norm = np.linalg.norm(F_total)
+
+        # AIが出力した本来の行動の「速さ（ベクトルの長さ）」は維持しつつ、
+        # 合力によって「向き」だけを滑らかに曲げる処理
+        if 1e-5 < total_norm :
+            safe_action = (F_total / total_norm) * action_norm
+            return safe_action
+        else:
+            return np.zeros(2, dtype=np.float32) # 合力がゼロ（完全に相殺）なら急停止
+
+
+
+==============================
+config.py
+==============================
+import os
+
+OUTPUT_DIR = "outputs"
+
+# 5回連続実験する際の手法名　手法、パラメータごとに一意に設定する
+# 命名規則も整備すべき
+EXP_NAME = "temp"
+
+# 5回連続実験したあと、平均を出したい手法名
+# TARGET_NAME = "V6_HIGH_NOISE"
+TARGET_NAME = "temp"
+
+# 学習する総エピソード数
+TOTAL_EPISODES = 1
+# 1エピソードの最大ステップ数
+MAX_STEPS_PER_EPISODE = 500
+
+# テスト時のエージェントのスタート位置
+AGENT_START_POS = [2.0, 2.0]
+# エージェントが目指す終点
+GOAL_POS = [-2.0, -2.0]
+
+# Jammerの設定
+"""
+設定例
+SAMPLE_JAMMER_CONFIGS = [
+    {
+        # ① 直線運動（start_pos と end_pos が必須）
+        "type": "linear_cross", 
+        "start_pos": [-2.0, -1.0], # 左下から
+        "end_pos": [2.0, -1.0],    # 右下へ横断
+        "speed": 0.04,
+    },
+    {
+        # ② サイン波（直線設定 ＋ amplitude と frequency が必須）
+        "type": "sin_wave", 
+        "start_pos": [2.0, 0.0],   # 右端から
+        "end_pos": [-2.0, 0.0],    # 左端へ
+        "amplitude": 0.8,          # 揺れ幅の大きさ
+        "frequency": 4.0,          # 波の数
+        "speed": 0.06,
+    },
+    {
+        # ③ 円運動（center と size と angle が必須）
+        "type": "circle",
+        "center": [0.0, 1.0],
+        "size": 0.7,
+        "speed": 0.05,
+        "angle": 0.0
+    }
+]
+"""
+JAMMER_CONFIGS = [
+    {
+        "type": "sin_wave", 
+        "start_pos": [-2.0, -2.0],  # ゴールからスタート
+        "end_pos": [2.0, 2.0],      # エージェントの初期位置へ向かって逆走
+        "amplitude": 0.4,           # 避けられるギリギリの道幅を残す
+        "frequency": 6.0,
+        "speed": 0.1,
+    }
+]
+
+OBSTACLE_RADIUS = 0.2           # 障害物の判定半径
+GOAL_TOLERANCE = 0.1            # ゴール判定の距離
+
+# ----- 報酬 -----
+WALL_PENALTY = -100  # 壁に衝突した際の報酬
+OBSTACLE_REWARD  = -1000 # 障害物に激突
+GOAL_REWARD = 1000 # ゴールに到達したとき
+
+
+
+===============================
+draw_average_reward.py
+===============================
+import datetime
+import os
+import glob
+import csv
+import numpy as np
+import matplotlib.pyplot as plt
+import config
+
+def draw_averaged_step_rewards(exp_name, now_time):
+    """
+    指定した実験名(exp_name)の直近5件のテストログCSVを読み込み、
+    ステップごとの報酬の平均と標準偏差を描画する。
+    """
+    # ターゲットとなるファイルの検索パターン (例: outputs/test_M7_MC_APF_*_log.csv)
+    pattern = os.path.join(config.OUTPUT_DIR, f"test_{exp_name}_*_log.csv")
+    
+    # 名前でソートし、最新の5件を取得
+    file_list = sorted(glob.glob(pattern))[-5:]
+
+    if not file_list:
+        print(f"エラー: [{exp_name}] のテストログCSVが見つかりません。")
+        print(f"検索パス: {pattern}")
+        return
+
+    print(f"=== [{exp_name}] の報酬データを集計します ===")
+    for f in file_list:
+        print(f" - 読み込み: {f}")
+
+    all_runs_rewards = []
+    max_steps = 0
+
+    # 1. 各ファイルから最右列の reward を読み込む
+    for file in file_list:
+        run_rewards = []
+        with open(file, "r") as f:
+            reader = csv.reader(f)
+            header = next(reader)
+            # rewardが右端（最後のインデックス）にあることを確認
+            reward_idx = len(header) - 1 
+            
+            for row in reader:
+                if len(row) > reward_idx:
+                    try:
+                        run_rewards.append(float(row[reward_idx]))
+                    except ValueError:
+                        continue # 空行や不正なデータはスキップ
+        
+        all_runs_rewards.append(run_rewards)
+        max_steps = max(max_steps, len(run_rewards))
+
+    # 2. パディング処理（終了後は np.nan で埋める）
+    padded_rewards = []
+    for run_rewards in all_runs_rewards:
+        if len(run_rewards) < max_steps:
+            # 終了した後のステップは、計算から除外するために np.nan を詰める
+            extended = run_rewards + [np.nan] * (max_steps - len(run_rewards))
+            padded_rewards.append(extended)
+        else:
+            padded_rewards.append(run_rewards)
+
+    rewards_array = np.array(padded_rewards)
+    
+    # 3. ステップごとの平均と標準偏差を計算
+    # np.nanmean / np.nanstd を使うことで、NaN（終了済みの機体）を無視して平均を出せる
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning) # 全員ゴールした後の警告を非表示
+        mean_rewards = np.nanmean(rewards_array, axis=0)
+        std_rewards = np.nanstd(rewards_array, axis=0)
+        
+    steps_range = range(max_steps)
+
+    # 4. 描画設定（平均値プロットに戻す）
+    plt.figure(figsize=(10, 5))
+    
+    # 標準偏差の幅を薄い赤で塗りつぶし
+    plt.fill_between(steps_range, 
+                     mean_rewards - std_rewards, 
+                     mean_rewards + std_rewards, 
+                     color='red', alpha=0.15, label='Reward Deviation (±1 std)')
+    
+    # 平均報酬を赤い実線で描画
+    plt.plot(steps_range, mean_rewards, color='red', linewidth=2.0, label=f'Mean Step Reward (n={len(file_list)})')
+    
+    # Y軸をSymlogに設定
+    plt.yscale('symlog', linthresh=10.0)
+    plt.ylim(-1500, 1500) 
+    
+    # X軸の設定（最大ステップ数にピッタリ合わせる）
+    plt.xlim(0, max_steps)
+    
+    plt.title(f"Step-by-Step Reward Analysis ({exp_name}) - Averaged")
+    plt.xlabel("Simulation Steps")
+    plt.ylabel("Instantaneous Reward (Symlog Scale)")
+    plt.grid(True, linestyle=':', alpha=0.7)
+    plt.axhline(0, color='black', linewidth=1.0, linestyle='--', zorder=1)
+    
+    plt.legend(loc='upper right')
+    plt.tight_layout()
+    
+    output_filename = f"averaged_test_reward_{exp_name}_{now_time}.png"
+    img_path = os.path.join(config.OUTPUT_DIR, output_filename)
+    plt.savefig(img_path) 
+    plt.close()
+    print(f"★ステップ報酬の平均化グラフを保存しました: {img_path}\n")
+
+if __name__ == "__main__":
+    now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+    # グラフ化したい実験名を指定して実行する
+    # 例: "M6_Kalman", "M7_MC_APF" など
+    draw_averaged_step_rewards(config.TARGET_NAME, now_time)
