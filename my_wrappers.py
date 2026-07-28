@@ -362,7 +362,7 @@ class MonteCarloPredictionWrapper(gym.Wrapper):
                 sim_vel = np.copy(velocity)
 
                 for _ in range(self.horizon_steps):
-                    # ランダムノイズ追加（ここがモンテカルロ）
+                    # ランダムノイズ追加(モンテカルロ）
                     noise = np.random.normal(0, self.noise_std, size=2)
                     sim_vel = sim_vel + noise
 
@@ -555,7 +555,8 @@ class PotentialFieldShieldWrapper(gym.Wrapper):
         steps = min(self.lookahead_steps, len(self.latest_preds[0]))
         
         # 影響圏（この距離以内に入ったら斥力が発生し始める）
-        influence_radius = self.safety_margin + 0.2
+        # influence_radius = self.safety_margin + 0.2
+        influence_radius = self.safety_margin
         
         for k in range(steps):
             # AIがそのまま進んだ場合の未来位置
