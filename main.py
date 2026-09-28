@@ -195,8 +195,6 @@ def draw_score_moving_average(
     print(f"移動平均スコアの画像を保存しました: {img_path}")
     return moving_avg.tolist()
 
-    return moving_avg.tolist()
-
 # 最後のテスト試行で生成したcsvから描画する関数
 def draw_from_csv(now_time, prediction_snapshots=None):
     csv_path = os.path.join(config.OUTPUT_DIR, f"{now_time}_test_log.csv")
