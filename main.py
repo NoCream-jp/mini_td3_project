@@ -72,7 +72,7 @@ def learn_td3(env, now_time: str):
 def actual_test(now_time, model, env):
     num_jammers = env.unwrapped.num_jammers
     prediction_snapshots = []
-    csv_filename = f"{now_time}_test_log.csv"   # ← now_time プレフィックスで統一
+    csv_filename = f"{now_time}_test_log.csv"
     csv_path = os.path.join(config.OUTPUT_DIR, csv_filename)
 
     with open(csv_path, "w", newline="") as file:
@@ -108,10 +108,11 @@ def actual_test(now_time, model, env):
 
             if finish_flag or over_step_flag:
                 print(f"本番テスト：ステップ {i} で衝突判定、または終了条件を検知しました。")
-                break
+                # break
 
     print(f"テストログ CSV を保存しました: {csv_path}")
     return prediction_snapshots
+
 # 報酬可視化関数
 def draw_score(now_time, rewards):
     plt.figure(figsize=(8, 5))
@@ -179,7 +180,7 @@ def draw_score_moving_average(
 
     plt.plot(episodes, moving_avg, color="orange", linewidth=1.8, label=f"Moving Avg (window={window})")
 
-    plt.title(f"Learning Curve - Moving Average (window={window}) ({now_time})")
+    plt.title(f"Moving Average Learning Curve (window={window}) ({now_time})")
     plt.xlabel("Episodes")
     plt.ylabel("Moving Average Reward")
     plt.yscale("symlog", linthresh=100)
