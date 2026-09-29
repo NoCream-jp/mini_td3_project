@@ -1,9 +1,8 @@
-import os
+# import os
 
 OUTPUT_DIR = "outputs"
 
 # 5回連続実験する際の手法名　手法、パラメータごとに一意に設定する
-# 命名規則も整備すべき
 EXP_NAME = "temp"
 
 # 5回連続実験したあと、平均を出したい手法名

@@ -429,9 +429,9 @@ def main():
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
 
     # 実験6のノイズを抑えた
-    env = VelocityObservationWrapper(raw_env)
-    env = KalmanPredictionWrapper(env, horizon_steps=8)
-    env = PotentialFieldShieldWrapper(env, lookahead_steps=8, safety_margin=0.35, k_rep=0.01)
+    # env = VelocityObservationWrapper(raw_env)
+    # env = KalmanPredictionWrapper(env, horizon_steps=8)
+    # env = PotentialFieldShieldWrapper(env, lookahead_steps=8, safety_margin=0.35, k_rep=0.01)
 
     # 【実験7】モンテカルロ法予測 ＋　人工ポテンシャルシールド（APF）
     # env = VelocityObservationWrapper(raw_env)
@@ -439,9 +439,9 @@ def main():
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
 
     # 実験7のパラメータ変更
-    # env = VelocityObservationWrapper(raw_env)
-    # env = MonteCarloPredictionWrapper(env, horizon_steps=10, num_samples=30)
-    # env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
+    env = VelocityObservationWrapper(raw_env)
+    env = MonteCarloPredictionWrapper(env, horizon_steps=8, num_samples=30)
+    env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
     #------------------------------------------------
 
     # 実験開始時刻
