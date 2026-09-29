@@ -1,3 +1,5 @@
+# exp_nameの直近5件の平均と標準偏差を可視化する。パス指定を修正する必要あり
+
 import datetime
 import os
 import glob
