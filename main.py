@@ -63,8 +63,8 @@ def learn_td3(env, now_time: str):
     max_possible_timesteps = config.TOTAL_EPISODES * config.MAX_STEPS_PER_EPISODE
     # learn打つ
     model.learn(total_timesteps=max_possible_timesteps, callback=callback)
-    # save
-    model_save_path = os.path.join(config.OUTPUT_DIR, f"{now_time}_simple_td3_model")
+    # save model
+    model_save_path = os.path.join(config.OUTPUT_DIR, f"simple_td3_model")
     model.save(model_save_path)
     return model, callback.episode_rewards
 
@@ -356,8 +356,8 @@ def create_animation_from_csv(now_time):
     
     # 凡例の設定
     handles, labels = ax.get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys(), loc='upper left', bbox_to_anchor=(1.05, 1))
+    by_label = {str(k): v for k, v in zip(labels, handles) if k}
+    ax.legend(list(by_label.values()), list(by_label.keys()), loc='upper left', bbox_to_anchor=(1.05, 1))
     fig.tight_layout()
 
     # 初期化関数
