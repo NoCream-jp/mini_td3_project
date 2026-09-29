@@ -51,7 +51,7 @@ class EpisodeLoggerCallback(BaseCallback):
         return True
 
 # 学習を進める
-def learn_td3(env):
+def learn_td3(env, now_time: str):
     # ノイズ設定(ランダム性を持たせる設定)
     n_actions = env.action_space.shape[-1]
     action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=np.ones(n_actions) * 0.3)
@@ -64,28 +64,31 @@ def learn_td3(env):
     # learn打つ
     model.learn(total_timesteps=max_possible_timesteps, callback=callback)
     # save
-    model.save(os.path.join(config.OUTPUT_DIR, "simple_td3_model"))
+    model_save_path = os.path.join(config.OUTPUT_DIR, f"{now_time}_simple_td3_model")
+    model.save(model_save_path)
     return model, callback.episode_rewards
 
 # 本番テストエピソード(1周だけ)を回し、記録するために呼ばれる関数
 def actual_test(now_time, model, env):
     num_jammers = env.unwrapped.num_jammers
     prediction_snapshots = []
-    
-    with open(os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv"), "w", newline="") as file:
+    csv_filename = f"{now_time}_test_log.csv"
+    csv_path = os.path.join(config.OUTPUT_DIR, csv_filename)
+
+    with open(csv_path, "w", newline="") as file:
         writer = csv.writer(file)
-        
+
         header = ["step", "agent_x", "agent_y"]
         for i in range(num_jammers):
             header.extend([f"j{i}_x", f"j{i}_y"])
-        header.append("reward") # jammerの数にも動的に対応できるよう最後に報酬を付け足すようにする
+        header.append("reward")
         writer.writerow(header)
-        
+
         obs, info = env.reset(options={"start_pos": config.AGENT_START_POS})
-        
+
         for i in range(config.MAX_STEPS_PER_EPISODE):
             action, _ = model.predict(obs, deterministic=True)
-            
+
             if i % 30 == 0 and 'jam_preds' in info:
                 agent_pos = (env.unwrapped.location[0], env.unwrapped.location[1])
                 prediction_snapshots.append({
@@ -93,22 +96,21 @@ def actual_test(now_time, model, env):
                     "agent_pos": agent_pos,
                     "preds": copy.deepcopy(info['jam_preds'])
                 })
-            
-            # 既存のコードのままで、ここで reward を受け取っています
+
             obs, reward, finish_flag, over_step_flag, info = env.step(action)
-            
-            # 行データの最後にも reward を追加
+
             row_data = [i, obs[0], obs[1]]
             for j in range(num_jammers):
                 row_data.extend([obs[2 + j*2], obs[3 + j*2]])
             row_data.append(reward)
-            
-            writer.writerow(row_data) 
-            
+
+            writer.writerow(row_data)
+
             if finish_flag or over_step_flag:
                 print(f"本番テスト：ステップ {i} で衝突判定、または終了条件を検知しました。")
-                break
-                
+                # break
+
+    print(f"テストログ CSV を保存しました: {csv_path}")
     return prediction_snapshots
 
 # 報酬可視化関数
@@ -125,14 +127,78 @@ def draw_score(now_time, rewards):
     plt.grid(True, linestyle=':', alpha=0.7)
     plt.legend()
     
-    img_path = os.path.join(config.OUTPUT_DIR, f"score_{now_time}.png")
+    img_path = os.path.join(config.OUTPUT_DIR, f"{now_time}_score.png")
     plt.savefig(img_path)
     plt.close()
     print(f"学習スコアの画像を保存しました: {img_path}")
 
+# 報酬値の移動平均を可視化する関数
+def draw_score_moving_average(
+    now_time,
+    rewards,
+    window: int = 100,
+    min_periods: int = 1,
+    plot_raw: bool = False,
+    figsize: tuple = (8, 5),
+    dpi: int = 100,
+    ylim: tuple = (-2500, 1500),
+    ):
+    """
+    直近 `window` エピソードのトレーリング移動平均を計算してプロット・保存する。
+
+    引数:
+      now_time: ファイル名等に用いるタイムスタンプ文字列
+      rewards: エピソードごとの報酬を並べた iterable（list / ndarray）
+      window: 移動平均のウィンドウ幅（直近 window ステップ: i-window+1 ... i）
+      min_periods: 平均を計算する最小サンプル数。例えば 1 にすると先頭から平均を出す。
+      plot_raw: 元のエピソード報酬も併せて描画するか。
+      figsize, dpi, ylim: 描画パラメータ
+    返り値:
+      moving_avg (list): 各エピソードに対応する移動平均（条件を満たさない箇所は np.nan）
+    """
+    # 型変換
+    arr = np.array(rewards, dtype=float)
+    n = len(arr)
+    if n == 0:
+        print("draw_score_moving_average: rewards が空です。処理を中止します。")
+        return []
+
+    # 移動平均（トレーリングウィンドウ）
+    moving_avg = np.full(n, np.nan, dtype=float)
+    for i in range(n):
+        start = max(0, i - window + 1)
+        count = i - start + 1
+        if count >= min_periods:
+            moving_avg[i] = arr[start : i + 1].mean()
+
+    # プロット
+    plt.figure(figsize=figsize, dpi=dpi)
+    episodes = np.arange(1, n + 1)
+
+    if plot_raw:
+        plt.plot(episodes, arr, color="green", linewidth=1.0, alpha=0.25, label="Episode Reward (raw)")
+
+    plt.plot(episodes, moving_avg, color="orange", linewidth=1.8, label=f"Moving Avg (window={window})")
+
+    plt.title(f"Moving Average Learning Curve (window={window}) ({now_time})")
+    plt.xlabel("Episodes")
+    plt.ylabel("Moving Average Reward")
+    plt.yscale("symlog", linthresh=100)
+    plt.ylim(ylim)
+    plt.axhline(0, color="black", linewidth=1.0, linestyle="--", zorder=1)
+    plt.grid(True, linestyle=":", alpha=0.7)
+    plt.legend()
+
+    # 保存
+    img_path = os.path.join(config.OUTPUT_DIR, f"{now_time}_score_ma_w{window}.png")
+    plt.savefig(img_path, bbox_inches="tight")
+    plt.close()
+    print(f"移動平均スコアの画像を保存しました: {img_path}")
+    return moving_avg.tolist()
+
 # 最後のテスト試行で生成したcsvから描画する関数
 def draw_from_csv(now_time, prediction_snapshots=None):
-    csv_path = os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv")
+    csv_path = os.path.join(config.OUTPUT_DIR, f"{now_time}_test_log.csv")
 
     x_history, y_history = [], []
     jammer_histories = {} 
@@ -223,14 +289,14 @@ def draw_from_csv(now_time, prediction_snapshots=None):
     
     plt.tight_layout()
     
-    img_path = os.path.join(config.OUTPUT_DIR, f"trajectory_{now_time}.png")
+    img_path = os.path.join(config.OUTPUT_DIR, f"{now_time}_trajectory.png")
     plt.savefig(img_path) 
     plt.close()
     print(f"軌跡の画像を保存しました: {img_path}")
 
 # CSVデータから時系列のGIFアニメーションを生成する関数
 def create_animation_from_csv(now_time):
-    csv_path = os.path.join(config.OUTPUT_DIR, f"test_{now_time}_log.csv")
+    csv_path = os.path.join(config.OUTPUT_DIR, f"{now_time}_test_log.csv")
 
     x_history, y_history = [], []
     jammer_histories = {} 
@@ -325,7 +391,7 @@ def create_animation_from_csv(now_time):
     # アニメーション作成 (interval=50 はコマの切り替え速度: 50ミリ秒)
     ani = animation.FuncAnimation(fig, update, frames=len(x_history), init_func=init, blit=True, interval=50)
 
-    gif_path = os.path.join(config.OUTPUT_DIR, f"animation_{now_time}.gif")
+    gif_path = os.path.join(config.OUTPUT_DIR, f"{now_time}_animation.gif")
     ani.save(gif_path, writer='pillow')
     plt.close()
     print(f"動的軌跡のGIFアニメーションを保存しました: {gif_path}")
@@ -378,8 +444,7 @@ def main():
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
     #------------------------------------------------
 
-    # 環境envを利用して学習を実行する
-    model, rewards_history = learn_td3(env)
+    # 実験開始時刻
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     run_id = f"{config.EXP_NAME}_{now_time}"
 
@@ -387,17 +452,41 @@ def main():
     print(f" 実験開始: {config.EXP_NAME} (ID: {run_id})")
     print(f"=========================================\n")
 
-    # 学習時のスコアの描画
-    draw_score(run_id, rewards_history)
+    # 環境envを利用して学習を実行する
+    model, rewards_history = learn_td3(env, now_time)
+
+    ######## 学習時のスコアの描画
+    try:
+        draw_score(now_time, rewards_history)
+    except Exception as e:
+        print(f"draw_score の実行に失敗しました: {e}")
+
+    ######## 移動平均の描画
+    try:
+        draw_score_moving_average(now_time, rewards_history, window=10, min_periods=1, plot_raw=False)
+    except Exception as e:
+        print(f"draw_score_moving_average の実行に失敗: {e}")
+
+    ######## actual_test から予測リストを受け取る
+    try:
+        pred_snapshots = actual_test(now_time, model, env)
+    except Exception as e:
+        print(f"actual_test の実行に失敗しました: {e}")
+        pred_snapshots = None
+
+    ######## 受け取ったリストをそのまま draw_from_csv に引き渡す
+    try:
+        draw_from_csv(now_time, pred_snapshots)
+    except Exception as e:
+        print(f"draw_from_csv の実行に失敗しました: {e}")
+
+    ######## 同じCSVを読み込んでGIFアニメーションを出力する
+    try:
+        create_animation_from_csv(now_time)
+    except Exception as e:
+        print(f"create_animation_from_csv の実行に失敗しました: {e}")
     
-    # actual_test から予測リストを受け取る
-    pred_snapshots = actual_test(run_id, model, env)
-    
-    # 受け取ったリストをそのまま draw_from_csv に引き渡す
-    draw_from_csv(run_id, pred_snapshots)
-    
-    # 同じCSVを読み込んでGIFアニメーションを出力する
-    create_animation_from_csv(run_id)
+    return
 
 if __name__ == "__main__":
     main()
