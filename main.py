@@ -108,7 +108,7 @@ def actual_test(now_time, model, env):
 
             if finish_flag or over_step_flag:
                 print(f"本番テスト：ステップ {i} で衝突判定、または終了条件を検知しました。")
-                # break
+                break
 
     print(f"テストログ CSV を保存しました: {csv_path}")
     return prediction_snapshots

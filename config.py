@@ -10,9 +10,9 @@ EXP_NAME = "temp"
 TARGET_NAME = "temp"
 
 # 学習する総エピソード数
-TOTAL_EPISODES = 600
+TOTAL_EPISODES = 200
 # 1エピソードの最大ステップ数
-MAX_STEPS_PER_EPISODE = 600
+MAX_STEPS_PER_EPISODE = 200
 
 # テスト時のエージェントのスタート位置
 AGENT_START_POS = [2.0, 2.0]
@@ -61,7 +61,7 @@ JAMMER_CONFIGS = [
 ]
 
 OBSTACLE_RADIUS = 0.2           # 障害物の判定半径
-GOAL_TOLERANCE = 0.1            # ゴール判定の距離
+GOAL_TOLERANCE = 0.4            # ゴール判定の距離
 
 # ----- 報酬 -----
 WALL_PENALTY = -100  # 壁に衝突した際の報酬
