@@ -404,7 +404,7 @@ def main():
     # モデル名を指定する場合はファイル名(例: "outputs/20261005_1310_model")を入力
     # 新規に学習する場合は空文字列 "" を指定
     # =================================================================
-    LOAD_MODEL_PATH = ""  
+    LOAD_MODEL_PATH = "20261005_1513_model"  
 
     # ------------------------------------------------
     # 共通処理：ラッパー装備（環境の構築）
@@ -460,20 +460,23 @@ def main():
     print(f" 実験開始: {config.EXP_NAME} (ID: {run_id})")
     print(f"=========================================\n")
 
-
     # =================================================================
     # 学習→テスト or モデルをロード→テスト
     # =================================================================
-    if LOAD_MODEL_PATH != "": # --- 既存モデルをロードしてテストのみ行う場合 ---
+    if LOAD_MODEL_PATH != "":  # --- 既存モデルをロードしてテストのみ行う場合 ---
+        # config.OUTPUT_DIR (outputs) のパスを結合する
+        full_model_path = os.path.join(config.OUTPUT_DIR, LOAD_MODEL_PATH)
+        
         # 拡張子 .zip がなくても自動補完されますが、ファイルの存在確認のために付与します
-        check_path = LOAD_MODEL_PATH if LOAD_MODEL_PATH.endswith(".zip") else LOAD_MODEL_PATH + ".zip"
+        check_path = full_model_path if full_model_path.endswith(".zip") else full_model_path + ".zip"
+        
         if not os.path.exists(check_path):
             print(f"エラー: 指定されたモデルが見つかりません -> {check_path}")
             return
             
-        print(f"保存済みのモデルを読み込みます: {LOAD_MODEL_PATH}")
+        print(f"保存済みのモデルを読み込みます: {check_path}")
         # envを必ず指定しないとpredict時に次元エラーになります
-        model = TD3.load(LOAD_MODEL_PATH, env=env)
+        model = TD3.load(full_model_path, env=env)
         
     else: # --- 新規に学習を行う場合 ---
         print("新規にモデルの学習を開始します...")
