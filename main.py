@@ -64,7 +64,7 @@ def learn_td3(env, now_time: str):
     # learn打つ
     model.learn(total_timesteps=max_possible_timesteps, callback=callback)
     # save model
-    model_save_path = os.path.join(config.OUTPUT_DIR, f"simple_td3_model")
+    model_save_path = os.path.join(config.OUTPUT_DIR, f"{now_time}_model")
     model.save(model_save_path)
     return model, callback.episode_rewards
 
@@ -399,14 +399,23 @@ def create_animation_from_csv(now_time):
 def main():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
 
-    #---------------wrapper装備----------------------
+    # =================================================================
+    # モード切り替え設定
+    # モデル名を指定する場合はファイル名(例: "outputs/20261005_1310_model")を入力
+    # 新規に学習する場合は空文字列 "" を指定
+    # =================================================================
+    LOAD_MODEL_PATH = ""  
+
+    # ------------------------------------------------
+    # 共通処理：ラッパー装備（環境の構築）
+    # ------------------------------------------------
     # 0. まず生の環境を作成
     raw_env = MyJammerEnv()
 
     # 【実験1】純粋な強化学習（座標のみ）
     # env = raw_env
 
-    # 【実験2】強化学習 ＋ 直線予測　＋　シールド
+    # 【実験2】強化学習 ＋ 直線予測 ＋ シールド
     # env = TrajectoryPredictionWrapper(raw_env, history_length=2, horizon_steps=20)
     # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
 
@@ -433,18 +442,17 @@ def main():
     # env = KalmanPredictionWrapper(env, horizon_steps=8)
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=8, safety_margin=0.35, k_rep=0.01)
 
-    # 【実験7】モンテカルロ法予測 ＋　人工ポテンシャルシールド（APF）
+    # 【実験7】モンテカルロ法予測 ＋ 人工ポテンシャルシールド（APF）
     # env = VelocityObservationWrapper(raw_env)
     # env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
 
-    # 実験7のパラメータ変更
+    # 実験7のパラメータ変更（デフォルト有効）
     env = VelocityObservationWrapper(raw_env)
     env = MonteCarloPredictionWrapper(env, horizon_steps=8, num_samples=30)
     env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
-    #------------------------------------------------
-
-    # 実験開始時刻
+    
+    # 実験開始時刻の取得
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     run_id = f"{config.EXP_NAME}_{now_time}"
 
@@ -452,41 +460,60 @@ def main():
     print(f" 実験開始: {config.EXP_NAME} (ID: {run_id})")
     print(f"=========================================\n")
 
-    # 環境envを利用して学習を実行する
-    model, rewards_history = learn_td3(env, now_time)
 
-    ######## 学習時のスコアの描画
-    try:
-        draw_score(now_time, rewards_history)
-    except Exception as e:
-        print(f"draw_score の実行に失敗しました: {e}")
+    # =================================================================
+    # 学習→テスト or モデルをロード→テスト
+    # =================================================================
+    if LOAD_MODEL_PATH != "": # --- 既存モデルをロードしてテストのみ行う場合 ---
+        # 拡張子 .zip がなくても自動補完されますが、ファイルの存在確認のために付与します
+        check_path = LOAD_MODEL_PATH if LOAD_MODEL_PATH.endswith(".zip") else LOAD_MODEL_PATH + ".zip"
+        if not os.path.exists(check_path):
+            print(f"エラー: 指定されたモデルが見つかりません -> {check_path}")
+            return
+            
+        print(f"保存済みのモデルを読み込みます: {LOAD_MODEL_PATH}")
+        # envを必ず指定しないとpredict時に次元エラーになります
+        model = TD3.load(LOAD_MODEL_PATH, env=env)
+        
+    else: # --- 新規に学習を行う場合 ---
+        print("新規にモデルの学習を開始します...")
+        model, rewards_history = learn_td3(env, now_time)
 
-    ######## 移動平均の描画
-    try:
-        draw_score_moving_average(now_time, rewards_history, window=10, min_periods=1, plot_raw=False)
-    except Exception as e:
-        print(f"draw_score_moving_average の実行に失敗: {e}")
+        # 学習時のスコアの描画
+        try:
+            draw_score(now_time, rewards_history)
+        except Exception as e:
+            print(f"draw_score の実行に失敗しました: {e}")
 
-    ######## actual_test から予測リストを受け取る
+        # 移動平均の描画
+        try:
+            draw_score_moving_average(now_time, rewards_history, window=10, min_periods=1, plot_raw=False)
+        except Exception as e:
+            print(f"draw_score_moving_average の実行に失敗: {e}")
+
+
+    # =================================================================
+    # 共通処理：本番テストエピソード（1周）と結果の可視化
+    # =================================================================
+    print("\n本番テストを開始します...")
     try:
         pred_snapshots = actual_test(now_time, model, env)
     except Exception as e:
         print(f"actual_test の実行に失敗しました: {e}")
         pred_snapshots = None
 
-    ######## 受け取ったリストをそのまま draw_from_csv に引き渡す
+    # テスト結果（CSV）から軌跡画像を生成
     try:
         draw_from_csv(now_time, pred_snapshots)
     except Exception as e:
         print(f"draw_from_csv の実行に失敗しました: {e}")
 
-    ######## 同じCSVを読み込んでGIFアニメーションを出力する
+    # テスト結果（CSV）からGIFアニメーションを生成
     try:
         create_animation_from_csv(now_time)
     except Exception as e:
         print(f"create_animation_from_csv の実行に失敗しました: {e}")
     
     return
-
 if __name__ == "__main__":
     main()

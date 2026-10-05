@@ -64,7 +64,7 @@ def learn_td3(env, now_time: str):
     # learn打つ
     model.learn(total_timesteps=max_possible_timesteps, callback=callback)
     # save
-    model_save_path = os.path.join(config.OUTPUT_DIR, f"{now_time}_simple_td3_model")
+    model_save_path = os.path.join(config.OUTPUT_DIR, f"{now_time}_model")
     model.save(model_save_path)
     return model, callback.episode_rewards
 
