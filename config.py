@@ -57,7 +57,7 @@ JAMMER_CONFIGS = [
         "amplitude": 0.4,           # 避けられるギリギリの道幅を残す
         "frequency": 6.0,
         "speed": 0.1,
-        "noise_std": 0.02,          # ノイズの標準偏差
+        "noise_std": 0.08,          # ノイズの標準偏差
     }
 ]
 

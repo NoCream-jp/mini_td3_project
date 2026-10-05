@@ -12,9 +12,7 @@ class JammerState:
     def __init__(self, config_dict):
         self.type = config_dict.get("type", "circle")
         self.speed = config_dict.get("speed", 0.05)
-
-        # ノイズの標準偏差
-        self.noise_std = config_dict.get("noise_std", 0.0)
+        self.noise_std = config_dict.get("noise_std", 0.0) 
         
         # ==========================================
         # ① 直線運動 (linear_cross) の初期化
@@ -41,7 +39,6 @@ class JammerState:
             direction = self.end_pos - self.start_pos
             self.total_dist = np.linalg.norm(direction) + 1e-6
             
-            # 波を横に揺らすための「垂直ベクトル」を計算しておく
             dir_unit = direction / self.total_dist
             self.perpendicular_unit = np.array([-dir_unit[1], dir_unit[0]], dtype=np.float32)
             
@@ -55,15 +52,7 @@ class JammerState:
             self.cx = config_dict.get("center", [0.0, 0.0])[0]
             self.cy = config_dict.get("center", [0.0, 0.0])[1]
             self.size = config_dict.get("size", 1.0)
-            # 円運動用の角度（ラジアン）
             self.t = math.radians(config_dict.get("angle", 0.0))
-
-        # ==========================================
-        # ★ ここでガウスノイズを重畳する
-        # ==========================================
-        if 0.0 < self.noise_std:
-            self.x += np.random.normal(0, self.noise_std)
-            self.y += np.random.normal(0, self.noise_std)
 
         self.x = 0.0
         self.y = 0.0
@@ -71,7 +60,6 @@ class JammerState:
         
     def update(self):
         """毎ステップ、各軌道に合わせた「時間・進捗」を進める"""
-        # 直線とサイン波は「進捗率 (0.0 〜 1.0)」を往復させる
         if self.type in ["linear_cross", "sin_wave"]:
             step_progress = self.speed / self.total_dist
             
@@ -86,7 +74,6 @@ class JammerState:
                     self.progress = 0.0
                     self.forward = True
                     
-        # 円・8の字はシンプルに「角度(t)」を回し続ける
         elif self.type in ["circle", "figure8"]:
             self.t += self.speed
             
@@ -95,29 +82,30 @@ class JammerState:
     def update_position(self):
         """進んだ「時間・進捗」を元に、実際の X, Y 座標を計算する"""
         if self.type == "linear_cross":
-            # 始点と終点の間を、progressの割合で直線補間
             pos = self.start_pos + (self.end_pos - self.start_pos) * self.progress
             self.x, self.y = pos[0], pos[1]
         
         elif self.type == "sin_wave":
-            # 1. まず直線の基準位置を出す
             base_pos = self.start_pos + (self.end_pos - self.start_pos) * self.progress
-            # 2. サイン波のうねり（垂直方向のズレ）を計算
             wave_offset = self.amplitude * math.sin(self.progress * math.pi * self.frequency)
-            # 3. 基準位置にズレを足し合わせる
             pos = base_pos + self.perpendicular_unit * wave_offset
             self.x, self.y = pos[0], pos[1]
         
         elif self.type == "circle":
-            # 三角関数で円を描く
             self.x = self.cx + self.size * math.cos(self.t)
             self.y = self.cy + self.size * math.sin(self.t)
             
         elif self.type == "figure8":
-            # Y軸の周波数を2倍にすることで8の字（リサージュ図形）を描く
             self.x = self.cx + self.size * math.sin(self.t)
             self.y = self.cy + self.size * math.sin(2.0 * self.t)
             
+        # ==========================================
+        # ガウスノイズの重畳
+        # ==========================================
+        if self.noise_std > 0.0:
+            self.x += np.random.normal(0, self.noise_std)
+            self.y += np.random.normal(0, self.noise_std)
+
         # 画面外に出ないようにクリップ（全軌道共通）
         self.x = np.clip(self.x, -2.0, 2.0)
         self.y = np.clip(self.y, -2.0, 2.0)
