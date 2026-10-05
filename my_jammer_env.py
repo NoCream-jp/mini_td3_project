@@ -12,6 +12,9 @@ class JammerState:
     def __init__(self, config_dict):
         self.type = config_dict.get("type", "circle")
         self.speed = config_dict.get("speed", 0.05)
+
+        # ノイズの標準偏差
+        self.noise_std = config_dict.get("noise_std", 0.0)
         
         # ==========================================
         # ① 直線運動 (linear_cross) の初期化
@@ -54,6 +57,13 @@ class JammerState:
             self.size = config_dict.get("size", 1.0)
             # 円運動用の角度（ラジアン）
             self.t = math.radians(config_dict.get("angle", 0.0))
+
+        # ==========================================
+        # ★ ここでガウスノイズを重畳する
+        # ==========================================
+        if 0.0 < self.noise_std:
+            self.x += np.random.normal(0, self.noise_std)
+            self.y += np.random.normal(0, self.noise_std)
 
         self.x = 0.0
         self.y = 0.0
