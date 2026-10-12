@@ -416,7 +416,7 @@ def main():
     raw_env = MyJammerEnv()
 
     # 【実験1】純粋な強化学習（座標のみ）
-    env = raw_env
+    # env = raw_env
 
     # 【実験2】強化学習 ＋ 直線予測 ＋ シールド
     # env = TrajectoryPredictionWrapper(raw_env, history_length=2, horizon_steps=20)
@@ -449,6 +449,10 @@ def main():
     # env = VelocityObservationWrapper(raw_env)
     # env = MonteCarloPredictionWrapper(env, horizon_steps=8, num_samples=30)
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
+    
+    # 【実験8】予測 ＋ シールド（APF）回避のみ、速度無し
+    env = MonteCarloPredictionWrapper(raw_env, horizon_steps=8, num_samples=30)
+    env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
     
     # 実験開始時刻の取得
     now_time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
