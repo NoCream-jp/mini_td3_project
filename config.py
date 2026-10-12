@@ -10,9 +10,9 @@ EXP_NAME = "temp"
 TARGET_NAME = "temp"
 
 # 学習する総エピソード数
-TOTAL_EPISODES = 200
+TOTAL_EPISODES = 1000
 # 1エピソードの最大ステップ数
-MAX_STEPS_PER_EPISODE = 200
+MAX_STEPS_PER_EPISODE = 1000
 
 # テスト時のエージェントのスタート位置
 AGENT_START_POS = [2.0, 2.0]
@@ -55,9 +55,9 @@ JAMMER_CONFIGS = [
         "start_pos": [-2.0, -2.0],  # ゴールからスタート
         "end_pos": [2.0, 2.0],      # エージェントの初期位置へ向かって逆走
         "amplitude": 0.4,           # 避けられるギリギリの道幅を残す
-        "frequency": 6.0,
+        "frequency": 12.0,
         "speed": 0.1,
-        "noise_std": 0.08,          # ノイズの標準偏差
+        "noise_std": 0.03,          # ノイズの標準偏差
     }
 ]
 

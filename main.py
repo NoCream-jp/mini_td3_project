@@ -233,7 +233,7 @@ def draw_from_csv(now_time, prediction_snapshots=None):
     plt.scatter(gx, gy, color='red', marker='*', s=200, label=f'Goal ({gx}, {gy})', zorder=5)
 
     # ジャマーの描画
-    colors = ['orange', 'purple', 'cyan', 'brown', 'pink']
+    colors = ['purple', 'cyan', 'brown', 'pink', 'orange']
     for i in range(num_jammers):
         c = colors[i % len(colors)]
         jx_hist = jammer_histories[i]['x']
@@ -248,6 +248,7 @@ def draw_from_csv(now_time, prediction_snapshots=None):
     plt.plot(x_history, y_history, color='blue', marker='.', linestyle='-', linewidth=1.5, label='Agent Trajectory', zorder=4)
     plt.scatter(x_history[0], y_history[0], color='green', marker='o', s=100, label='Start', zorder=5)
     
+    """
     # 予測リストの描画
     if prediction_snapshots:
         for idx, shot in enumerate(prediction_snapshots):
@@ -275,6 +276,7 @@ def draw_from_csv(now_time, prediction_snapshots=None):
                 
                 pred_label = "Predicted Traj" if idx == 0 and jam_idx < num_jammers else ""
                 plt.plot(px, py, color=c, linestyle=':', alpha=alpha_val, linewidth=lw_val, zorder=4, label=pred_label)
+    """
 
     plt.title(f"Dynamic Jammer Evasion ({now_time})")
     plt.xlabel("X")
@@ -404,8 +406,8 @@ def main():
     # モデル名を指定する場合はファイル名(例: "outputs/20261005_1310_model")を入力
     # 新規に学習する場合は空文字列 "" を指定
     # =================================================================
-    LOAD_MODEL_PATH = "20261005_1513_model"  
-    # LOAD_MODEL_PATH = "" 
+    # LOAD_MODEL_PATH = "20261005_1513_model"  
+    LOAD_MODEL_PATH = "" 
 
     # ------------------------------------------------
     # 共通処理：ラッパー装備（環境の構築）
@@ -445,12 +447,11 @@ def main():
 
     # 【実験7】モンテカルロ法予測 ＋ 人工ポテンシャルシールド（APF）
     # env = VelocityObservationWrapper(raw_env)
-    # env = MonteCarloPredictionWrapper(env, horizon_steps=20, num_samples=50)
-    # env = PotentialFieldShieldWrapper(env, lookahead_steps=15, safety_margin=0.35, k_rep=0.05)
-
-    # 実験7のパラメータ変更（デフォルト有効）
-    env = VelocityObservationWrapper(raw_env)
-    env = MonteCarloPredictionWrapper(env, horizon_steps=8, num_samples=30)
+    # env = MonteCarloPredictionWrapper(env, horizon_steps=8, num_samples=30)
+    # env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
+    
+    # 【実験8】予測 ＋ シールド（APF）回避のみ、速度無し
+    env = MonteCarloPredictionWrapper(raw_env, horizon_steps=8, num_samples=30)
     env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
     
     # 実験開始時刻の取得
