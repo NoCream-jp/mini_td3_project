@@ -32,3 +32,104 @@ TD3のみ1000x1000。よさそうな軌道とよさそうな学習率。後半�
 gifでは問題なく回避できているレベル。これまでで一番よさそうなグラフ。
 
 20261013_0202_animation.gif
+
+## 10/19
+
+20261018_2148_animation.gif
+まずモジュール無し 1000x1000
+失敗した。ブレがないか確認する。もう2回ほど。
+
+20261018_2223_animation.gif
+モジュール無し二回目
+成功。報酬値は先週と同じようなイメージ。
+
+20261018_2253_animation.gif
+モジュール無し三回目
+成功。終盤少しある
+
+20261018_2305_animation.gif
+全モジュール一回目。
+成功。収束が比較的早い
+
+
+20261018_2338_animation.gif
+全モジュール二回目。
+失敗。
+\----------------------------------
+| rollout/           |           |
+|    ep_len_mean     | 990       |
+|    ep_rew_mean     | -2.33e+03 |
+| time/              |           |
+|    episodes        | 996       |
+|    fps             | 52        |
+|    time_elapsed    | 17995     |
+|    total_timesteps | 945700    |
+| train/             |           |
+|    actor_loss      | 232       |
+|    critic_loss     | 8         |
+|    learning_rate   | 0.001     |
+|    n_updates       | 945599    |
+
+20261019_1312_animaiton.gif
+全モジュール三回目
+成功している。が、報酬値の推移に不安がある気がする。後半に大きく失敗しているのは良くない結果かもしれない
+
+20261019_1407_animation.gif
+速度モジュールのみ一回目
+成功。よさそう
+\---------------------------------
+| rollout/           |          |        
+|    ep_len_mean     | 32.4     |        
+|    ep_rew_mean     | 914      |        
+| time/              |          |        
+|    episodes        | 996      |        
+|    fps             | 37       |        
+|    time_elapsed    | 3708     |        
+|    total_timesteps | 139220   |        
+| train/             |          |        
+|    actor_loss      | -751     |        
+|    critic_loss     | 278      |        
+|    learning_rate   | 0.001    |        
+|    n_updates       | 139119   |        
+\---------------------------------  
+
+20261019_1806_animation.gif
+速度のみ二回目
+成功。報酬は概ねよさそう
+
+\---------------------------------
+| rollout/           |          |        
+|    ep_len_mean     | 34.8     |        
+|    ep_rew_mean     | 914      |        
+| time/              |          |        
+|    episodes        | 996      |        
+|    fps             | 63       |        
+|    time_elapsed    | 957      |        
+|    total_timesteps | 60957    |        
+| train/             |          |        
+|    actor_loss      | -759     |        
+|    critic_loss     | 894      |        
+|    learning_rate   | 0.001    |        
+|    n_updates       | 60856    |        
+\---------------------------------  
+
+20261019_1837_animation.gif
+速度のみ三回目
+失敗した。
+報酬値も後半までずっと低い
+
+\---------------------------------
+| rollout/           |          |        
+|    ep_len_mean     | 25       |        
+|    ep_rew_mean     | 596      |        
+| time/              |          |        
+|    episodes        | 996      |        
+|    fps             | 40       |        
+|    time_elapsed    | 1373     |        
+|    total_timesteps | 55414    |        
+| train/             |          |        
+|    actor_loss      | -26.5    |        
+|    critic_loss     | 5.58e+03 |        
+|    learning_rate   | 0.001    |        
+|    n_updates       | 55313    |        
+\---------------------------------
