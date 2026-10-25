@@ -339,7 +339,7 @@ def create_animation_from_csv(now_time):
     jammer_dots = []
     jammer_tails = []
     jammer_circles = []
-    colors = ['orange', 'purple', 'cyan', 'brown', 'pink']
+    colors = ['purple', 'cyan', 'brown', 'pink', 'orange']
 
     for i in range(num_jammers):
         c = colors[i % len(colors)]
