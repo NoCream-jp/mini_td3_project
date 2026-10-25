@@ -10,9 +10,9 @@ EXP_NAME = "temp"
 TARGET_NAME = "temp"
 
 # 学習する総エピソード数
-TOTAL_EPISODES = 1000
+TOTAL_EPISODES = 100
 # 1エピソードの最大ステップ数
-MAX_STEPS_PER_EPISODE = 1000
+MAX_STEPS_PER_EPISODE = 100
 
 # テスト時のエージェントのスタート位置
 AGENT_START_POS = [2.0, 2.0]
@@ -33,11 +33,12 @@ SAMPLE_JAMMER_CONFIGS = [
     {
         # ② サイン波（直線設定 ＋ amplitude と frequency が必須）
         "type": "sin_wave", 
-        "start_pos": [2.0, 0.0],   # 右端から
-        "end_pos": [-2.0, 0.0],    # 左端へ
-        "amplitude": 0.8,          # 揺れ幅の大きさ
-        "frequency": 4.0,          # 波の数
-        "speed": 0.06,
+        "start_pos": [-2.0, -2.0],  # ゴールからスタート
+        "end_pos": [2.0, 2.0],      # エージェントの初期位置へ向かって逆走
+        "amplitude": 0.4,           # 避けられるギリギリの道幅を残す
+        "frequency": 12.0,
+        "speed": 0.1,
+        "noise_std": 0.03,          # ノイズの標準偏差
     },
     {
         # ③ 円運動（center と size と angle が必須）
@@ -46,19 +47,48 @@ SAMPLE_JAMMER_CONFIGS = [
         "size": 0.7,
         "speed": 0.05,
         "angle": 0.0
-    }
+    },
+    {
+        # 走査
+        "type": "serpentine",
+        "speed": 0.08,
+        "lane_spacing": 0.6,
+        "margin": 0.2,
+        "noise_std": 0.03,
+    },
+    {
+        # 追尾
+        "type": "chase",
+        "start_pos": [2.0, -2.0],
+        "speed": 0.05,
+        "noise_std": 0.02,
+    },
 ]
 """
+
 JAMMER_CONFIGS = [
+    # {
+    #     "type": "sin_wave", 
+    #     "start_pos": [-2.0, -2.0],  # ゴールからスタート
+    #     "end_pos": [2.0, 2.0],      # エージェントの初期位置へ向かって逆走
+    #     "amplitude": 0.4,           # 避けられるギリギリの道幅を残す
+    #     "frequency": 12.0,
+    #     "speed": 0.1,
+    #     "noise_std": 0.03,          # ノイズの標準偏差
+    # },
+    # {
+    #     "type": "chase",
+    #     "start_pos": [-2.0, -2.0],
+    #     "speed": 0.05,
+    #     "noise_std": 0.02,
+    # },
     {
-        "type": "sin_wave", 
-        "start_pos": [-2.0, -2.0],  # ゴールからスタート
-        "end_pos": [2.0, 2.0],      # エージェントの初期位置へ向かって逆走
-        "amplitude": 0.4,           # 避けられるギリギリの道幅を残す
-        "frequency": 12.0,
-        "speed": 0.1,
-        "noise_std": 0.03,          # ノイズの標準偏差
-    }
+        "type": "serpentine",
+        "speed": 0.08,
+        "lane_spacing": 0.6,
+        "margin": 0.2,
+        "noise_std": 0.03,
+    },
 ]
 
 OBSTACLE_RADIUS = 0.2           # 障害物の判定半径
