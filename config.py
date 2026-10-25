@@ -10,9 +10,9 @@ EXP_NAME = "temp"
 TARGET_NAME = "temp"
 
 # 学習する総エピソード数
-TOTAL_EPISODES = 100
+TOTAL_EPISODES = 2000
 # 1エピソードの最大ステップ数
-MAX_STEPS_PER_EPISODE = 100
+MAX_STEPS_PER_EPISODE = 2000
 
 # テスト時のエージェントのスタート位置
 AGENT_START_POS = [2.0, 2.0]
