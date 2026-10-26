@@ -10,9 +10,9 @@ EXP_NAME = "temp"
 TARGET_NAME = "temp"
 
 # 学習する総エピソード数
-TOTAL_EPISODES = 2000
+TOTAL_EPISODES = 1000
 # 1エピソードの最大ステップ数
-MAX_STEPS_PER_EPISODE = 2000
+MAX_STEPS_PER_EPISODE = 1000
 
 # テスト時のエージェントのスタート位置
 AGENT_START_POS = [2.0, 2.0]
@@ -76,19 +76,21 @@ JAMMER_CONFIGS = [
     #     "speed": 0.1,
     #     "noise_std": 0.03,          # ノイズの標準偏差
     # },
-    # {
-    #     "type": "chase",
-    #     "start_pos": [-2.0, -2.0],
-    #     "speed": 0.05,
-    #     "noise_std": 0.02,
-    # },
     {
-        "type": "serpentine",
-        "speed": 0.08,
-        "lane_spacing": 0.6,
-        "margin": 0.2,
-        "noise_std": 0.03,
+        # 追尾
+        "type": "chase",
+        "start_pos": [-2.0, -2.0],
+        "speed": 0.05,
+        "noise_std": 0.02,
     },
+    # {   
+    #     # 走査
+    #     "type": "serpentine",
+    #     "speed": 0.08,
+    #     "lane_spacing": 0.6,
+    #     "margin": 0.2,
+    #     "noise_std": 0.03,
+    # },
 ]
 
 OBSTACLE_RADIUS = 0.2           # 障害物の判定半径

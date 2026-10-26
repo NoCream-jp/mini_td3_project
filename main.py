@@ -423,7 +423,7 @@ def main():
     # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
 
     # 【実験3】強化学習 ＋ 速度ベクトル入力
-    env = VelocityObservationWrapper(raw_env)
+    # env = VelocityObservationWrapper(raw_env)
 
     # 【実験4】ハイブリッド（速度入力 ＋ CV予測シールド）
     # env = VelocityObservationWrapper(raw_env)
@@ -446,9 +446,9 @@ def main():
     # env = PotentialFieldShieldWrapper(env, lookahead_steps=8, safety_margin=0.35, k_rep=0.01)
 
     # 【実験7】モンテカルロ法予測 ＋ 人工ポテンシャルシールド（APF）
-    # env = VelocityObservationWrapper(raw_env)
-    # env = MonteCarloPredictionWrapper(env, horizon_steps=8, num_samples=30)
-    # env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
+    env = VelocityObservationWrapper(raw_env)
+    env = MonteCarloPredictionWrapper(env, horizon_steps=8, num_samples=30)
+    env = PotentialFieldShieldWrapper(env, lookahead_steps=5, safety_margin=0.35, k_rep=0.01)
     
     # 【実験8】予測 ＋ シールド（APF）回避のみ、速度無し
     # env = MonteCarloPredictionWrapper(raw_env, horizon_steps=8, num_samples=30)
