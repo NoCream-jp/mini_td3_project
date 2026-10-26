@@ -406,7 +406,7 @@ def main():
     # モデル名を指定する場合はファイル名(例: "outputs/20261005_1310_model")を入力
     # 新規に学習する場合は空文字列 "" を指定
     # =================================================================
-    # LOAD_MODEL_PATH = "20261005_1513_model"  
+    # 例：LOAD_MODEL_PATH = "20261005_1513_model"  
     LOAD_MODEL_PATH = "" 
 
     # ------------------------------------------------
@@ -416,14 +416,14 @@ def main():
     raw_env = MyJammerEnv()
 
     # 【実験1】純粋な強化学習（座標のみ）
-    env = raw_env
+    # env = raw_env
 
     # 【実験2】強化学習 ＋ 直線予測 ＋ シールド
     # env = TrajectoryPredictionWrapper(raw_env, history_length=2, horizon_steps=20)
     # env = SafetyShieldWrapper(env, lookahead_steps=15, safety_margin=0.35)
 
     # 【実験3】強化学習 ＋ 速度ベクトル入力
-    # env = VelocityObservationWrapper(raw_env)
+    env = VelocityObservationWrapper(raw_env)
 
     # 【実験4】ハイブリッド（速度入力 ＋ CV予測シールド）
     # env = VelocityObservationWrapper(raw_env)
