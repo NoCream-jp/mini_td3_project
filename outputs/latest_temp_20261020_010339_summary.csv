@@ -1,2 +1,0 @@
-model,k,goals,collisions,timeouts,success_rate,collision_rate,timeout_rate,success_ci95_low,success_ci95_high,mean_reward,mean_success_steps,mean_success_path_length
-train01_seed1000,5,5,0,0,1.0,0.0,0.0,0.5655085052479191,1.0000000000000002,796.8054685533046,61.0,6.3838736232370135
