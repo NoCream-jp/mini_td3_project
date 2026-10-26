@@ -3,7 +3,7 @@
 __pycache__/
 
 # 学習済みモデルやログ（これらは手元で管理するため）
-# outputs/
+outputs/
 
 # OS固有のファイル
 .DS_Store
