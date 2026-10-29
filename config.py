@@ -81,7 +81,7 @@ JAMMER_CONFIGS = [
         "type": "chase",
         "start_pos": [-2.0, -2.0],
         "speed": 0.05,
-        "noise_std": 0.02,
+        "noise_std": 0.03,
     },
     # {   
     #     # 走査
@@ -94,7 +94,7 @@ JAMMER_CONFIGS = [
 ]
 
 OBSTACLE_RADIUS = 0.2           # 障害物の判定半径
-GOAL_TOLERANCE = 0.4            # ゴール判定の距離
+GOAL_TOLERANCE = 0.1            # ゴール判定の距離
 
 # ----- 報酬 -----
 WALL_PENALTY = -100  # 壁に衝突した際の報酬
