@@ -284,7 +284,7 @@ class MyJammerEnv(gym.Env):
             reward = config.GOAL_REWARD
             finish_flag = True
         else:
-            reward = -float(dist_to_goal)
+            reward = -float(dist_to_goal) * 2
             if hit_wall:
                 reward += config.WALL_PENALTY
 
