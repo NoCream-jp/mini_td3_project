@@ -81,7 +81,7 @@ JAMMER_CONFIGS = [
         "type": "chase",
         "start_pos": [-2.0, -2.0],
         "speed": 0.05,
-        "noise_std": 0.03,
+        "noise_std": 0.05,
     },
     # {   
     #     # 走査
